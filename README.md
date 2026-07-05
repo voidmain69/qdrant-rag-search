@@ -182,6 +182,7 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 | `POST /api/v1/search` | Search | `200` → results |
 | `GET /health` | Liveness | always `200` |
 | `GET /ready` | Readiness (Qdrant reachable, models loaded, CodeIndex built) | `200` / `503` |
+| `GET /metrics` | Prometheus metrics (if `METRICS_ENABLED=true`) | `200` |
 
 Common errors: `401` invalid/missing API key, `422` validation error (Pydantic detail body), `400` rerank requested but disabled, `413` import file > 100 MB.
 
@@ -400,7 +401,12 @@ All settings via environment / `.env` (see `.env.example`, parsed by pydantic-se
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
 | `QDRANT_API_KEY` | — | Qdrant API key (if secured) |
 | `COLLECTION_NAME` | `products` | main collection |
-| `API_KEYS` | — | comma-separated API keys; **empty disables auth** |
+| `API_KEYS` | — | comma-separated API keys; **empty disables auth** (forbidden when `ENVIRONMENT=production`) |
+| `ENVIRONMENT` | `development` | `development` / `staging` / `production`; production refuses to start without `API_KEYS` |
+| `LOG_FORMAT` | env-dependent | `text` (development default) or `json` (staging/production default) |
+| `METRICS_ENABLED` | `true` | Prometheus metrics at `GET /metrics` |
+| `SENTRY_DSN` | — | Sentry error tracking; empty = disabled |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | Sentry performance tracing sample rate (0–1) |
 | `DENSE_MODEL` | `intfloat/multilingual-e5-large` | FastEmbed dense model |
 | `DENSE_DIM` | `1024` | must match the model |
 | `SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed sparse model |
@@ -413,6 +419,13 @@ All settings via environment / `.env` (see `.env.example`, parsed by pydantic-se
 | `DEBUG` | `false` | debug logging |
 
 Changing `DENSE_MODEL`/`DENSE_DIM`/`SPARSE_MODEL` against an existing collection triggers the `service_meta` guard: the service exits with a clear reindex instruction instead of mixing incompatible vectors.
+
+### Observability
+
+- **Request IDs** — every request gets an `X-Request-ID` (accepted from the client or generated), echoed in the response and stamped on every log record.
+- **Logs** — one uniform stream (app + uvicorn) via the root logger: human-readable text in development, single-line JSON in staging/production (`LOG_FORMAT` overrides). `extra={...}` fields become top-level JSON keys.
+- **Metrics** — `GET /metrics` (Prometheus): standard HTTP metrics (latency histograms, status codes, in-flight) plus domain metrics `search_requests_total{query_kind}` and `search_latency_seconds{query_kind}`.
+- **Errors** — unhandled exceptions are logged with the request id, returned as JSON `500 {"detail": "Internal server error"}`, and captured by Sentry when `SENTRY_DSN` is set (environment tag = `ENVIRONMENT`, no PII sent).
 
 ### Optional reranking
 
@@ -430,11 +443,16 @@ Best quality on long/ambiguous phrases, +50–200 ms when enabled. Requesting `r
 
 ```bash
 uv sync --group dev
-uv run pytest -q                            # 45 unit tests — no Qdrant/models needed
+uv run pytest -q                            # 62 unit tests — no Qdrant/models needed
 uv run pytest -m integration -q -o addopts="" # 13 e2e tests against a running compose stack
-uv run ruff check app tests scripts
+uv run ruff check app tests scripts         # lint
+uv run ruff format app tests scripts        # format
+uv run mypy                                 # type check (app/)
+uv run pre-commit install                   # ruff + mypy + hygiene checks on every commit
 uv run python scripts/gen_sample_data.py    # regenerate data/sample_products.json (valid EAN-13s)
 ```
+
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs lint, format check, mypy, unit tests, and a Docker image build on every push/PR. See `docs/production_readiness.md` for the production checklist.
 
 Layout:
 
