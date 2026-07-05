@@ -1,53 +1,257 @@
 # Qdrant Product Search
 
-Production-сервіс пошуку товарів на Qdrant: семантика + BM25 + точний і fuzzy-пошук за кодами.
+A production-grade **product search service** built on [Qdrant](https://qdrant.tech/). It combines semantic vector search, lexical BM25, and an exact/fuzzy code-matching engine behind a single REST API, so one endpoint correctly answers every kind of query a product catalog receives:
 
-Один пошуковий ендпоінт розумно обробляє всі типи запитів:
-
-| Запит | Гілка | Як працює |
+| Query example | What the user meant | How it is answered |
 |---|---|---|
-| `бездротовий пилосос для дому` | `hybrid` | dense (multilingual-e5-large) + sparse (BM25) з серверним RRF-фьюжном Qdrant Query API |
-| `акумулятор 18V 5Ah Li-Ion` | `hybrid` | одиниці виміру (18V, 5Ah) розпізнаються і НЕ вважаються кодами |
-| `GSB-13-RE` (артикул) | `exact` | нормалізація (регістр, роздільники, кирилично-латинські гомогліфи) + O(1) lookup |
-| `НВ-1234` (кирилицею) | `exact` | Н→H, В→B — код, набраний в українській розкладці, знаходиться |
-| `BQSCH-O6` (OCR-плутанина) | `exact_normalized` | лосі OCR-скелет: O→0, I→1, S→5, B→8 … |
-| `4006381333932` (зіпсований EAN) | `ean_corrected` | checksum-aware генерація кандидатів: одна невірна цифра / транспозиція сусідніх |
-| `GSB-13-RF` (одрук) | `fuzzy` | RapidFuzz: OSA + Jaro-Winkler по in-memory корпусу всіх кодів |
-| `дриль GSB13RE з кейсом` | `mixed` | точні код-хіти піняться першими, решта — гібридний пошук |
+| `бездротовий пилосос для дому` | a natural-language phrase | dense + sparse hybrid search with server-side RRF fusion |
+| `акумулятор 18V 5Ah Li-Ion` | product characteristics | hybrid search — measurement tokens (`18V`, `5Ah`) are recognized as units, **not** product codes |
+| `GSB-13-RE` | an exact article / SKU | O(1) exact lookup, ~3 ms |
+| `НВ-500Т` (Cyrillic letters) | a SKU typed in a Ukrainian keyboard layout | Cyrillic→Latin homoglyph normalization (`Н→H`, `В→B`, `Т→T`) |
+| `BQSCH-O6` | an OCR-mangled code | lossy OCR-skeleton matching (`O↔0`, `I↔1`, `S↔5`, `B↔8`, …) |
+| `4006381333932` | an EAN-13 with one wrong digit | checksum-aware error correction (single substitution / adjacent transposition) |
+| `GSB-13-RF` | a typo in an article | RapidFuzz cascade (OSA + Jaro-Winkler) over an in-memory code corpus |
+| `дриль GSB13RE з кейсом` | code + free text | both branches run; exact code hits are pinned first |
 
-Кожен hit містить `match: {branch, matched_field, code_score}` — видно, чому товар у видачі.
+Every hit carries a `match` explanation (`branch`, `matched_field`, `code_score`), so clients can always see *why* a product ranked where it did.
 
-## Швидкий старт
+The service exposes two API surfaces:
 
-```bash
-cp .env.example .env          # задайте API_KEYS
-docker compose up -d --build  # перший старт завантажує ~2.2 ГБ моделей у volume
-# чекаємо healthy:  curl http://localhost:8000/ready
+1. **Ingestion API** — push products (single / batch / file import) for normalization, vectorization, and upsert into Qdrant.
+2. **Search API** — one intelligent search endpoint with filters, pagination, and optional cross-encoder reranking.
 
-# демо: інжест 38 зразків + усі типи запитів
-uv run python scripts/smoke_search.py
+There is deliberately **no LLM answer generation**: this is a search engine, not a chatbot. Catalog data is multilingual (Ukrainian / Russian / English).
+
+---
+
+## Table of contents
+
+- [Architecture](#architecture)
+- [Key flows](#key-flows)
+- [API contract](#api-contract)
+- [Request / response examples](#request--response-examples)
+- [Deployment](#deployment)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Design decisions & limitations](#design-decisions--limitations)
+
+---
+
+## Architecture
+
+```
+                                ┌──────────────────────────────────────────────┐
+                                │                 FastAPI (api)                │
+                                │                                              │
+ POST /api/v1/products ───────► │  IngestService                               │
+ POST /api/v1/products:batch    │   normalize ─► embed (dense+sparse) ─► upsert│───► Qdrant
+ POST /api/v1/imports (files)   │   └─► CodeIndex.add (incremental)            │     collection "products"
+                                │                                              │      ├ named vector  "dense"       (1024, cosine)
+ POST /api/v1/search ─────────► │  SearchService                               │      ├ sparse vector "sparse_text" (BM25 + IDF)
+                                │   classify(query)                            │      └ payload indexes (keyword/float/bool/text)
+                                │   ├─ CODE_ONLY ─► CodeIndex (in-memory)      │
+                                │   │    exact → skeleton → EAN-fix → fuzzy    │     collection "service_meta"
+                                │   ├─ TEXT ──────► query_points(              │      └ embedding model / dim / schema version
+                                │   │    prefetch=[dense, sparse], RRF fusion) │
+                                │   │    └─ optional cross-encoder rerank      │
+                                │   └─ MIXED ─────► both, exact hits pinned    │
+                                └──────────────────────────────────────────────┘
 ```
 
-Qdrant dashboard: http://localhost:6333/dashboard
+### Components
 
-## API
+| Component | File | Responsibility |
+|---|---|---|
+| **Query router** | `app/services/query_router.py` | Classifies queries (`code_only` / `text` / `mixed`), orchestrates branches, merges results |
+| **Code index** | `app/services/code_index.py` | In-memory exact/fuzzy index over all article / product-code / EAN values |
+| **Normalization** | `app/services/normalization.py` | Code canonicalization, homoglyph mapping, OCR skeleton, embedding-text composition |
+| **EAN engine** | `app/services/ean.py` | EAN-13 checksum validation and error-candidate generation |
+| **Embeddings** | `app/services/embedding.py` | Local dense + sparse embeddings via FastEmbed (ONNX, CPU), model profiles |
+| **Qdrant service** | `app/services/qdrant.py` | Collection schema, payload indexes, hybrid RRF query, filter builder |
+| **Ingest** | `app/services/ingest.py` | normalize → embed → upsert pipeline, deterministic point IDs |
+| **Importer** | `app/services/importer.py` | CSV / JSON / XLSX parsing, column mapping, background jobs |
+| **Reranker** | `app/services/reranker.py` | Optional lazy-loaded cross-encoder (`BAAI/bge-reranker-v2-m3`) |
 
-Автентифікація: заголовок `X-API-Key` (список ключів у `API_KEYS`, comma-separated; порожній = вимкнено, тільки для dev). `/health`, `/ready` — відкриті.
+### Models
 
-| Маршрут | Призначення |
-|---|---|
-| `POST /api/v1/products` | upsert одного товару |
-| `POST /api/v1/products:batch` | upsert до 1000 товарів |
-| `PUT /api/v1/products/{external_id}` | повна заміна |
-| `DELETE /api/v1/products/{external_id}` | видалення |
-| `POST /api/v1/imports` | файловий імпорт CSV/JSON/XLSX (multipart; опційно `column_mapping`) |
-| `GET /api/v1/imports/{job_id}` | прогрес імпорту |
-| `POST /api/v1/search` | пошук |
-| `GET /health`, `GET /ready` | liveness / readiness |
+- **Dense**: `intfloat/multilingual-e5-large` (FastEmbed/ONNX, CPU, 1024-dim, cosine). Strong uk/ru/en semantics; `query:` / `passage:` prefixes are applied by a model-profile abstraction, so the model can be swapped via config.
+- **Sparse**: `Qdrant/bm25` with the Russian Snowball stemmer (no Ukrainian stemmer exists in FastEmbed; Ukrainian and English tokens still match verbatim). Requires the `IDF` modifier on the Qdrant sparse vector — configured automatically.
+- **Fusion**: native Qdrant Query API — `query_points` with two `prefetch` branches fused by **Reciprocal Rank Fusion** on the server. No hand-tuned score weights.
+- **Reranker** (optional): `BAAI/bge-reranker-v2-m3` cross-encoder via sentence-transformers, lazy-loaded on the first `rerank=true` request.
 
-OpenAPI/Swagger: http://localhost:8000/docs
+### Text composition (what gets embedded)
 
-### Приклад: інжест
+- **Dense text**: `name + brand + category + attributes + description`. Codes/SKU/EAN are **excluded** so alphanumeric noise never pollutes the semantic vector.
+- **Sparse text**: dense text **plus** all code fields in both raw and normalized form — the hybrid branch gets lexical exact-match power on codes for free.
+
+### Code matching cascade
+
+For each code-like query token (first non-empty tier wins):
+
+| Tier | Mechanism | Score | Branch |
+|---|---|---|---|
+| 1 | exact match on normalized form (NFKC, uppercase, separators stripped, Cyrillic homoglyphs → Latin) | 1.00 | `exact` |
+| 2 | exact match on lossy OCR skeleton (`O→0, Q→0, D→0, I→1, L→1, Z→2, S→5, G→6, B→8, З→3`) | 0.97 | `exact_normalized` |
+| 3 | checksum-valid EAN-13 candidates one digit-substitution or adjacent transposition away; also UPC-A→EAN-13 promotion and GTIN-14 handling | 0.95 | `ean_corrected` |
+| 4 | RapidFuzz `process.extract` over the whole corpus: OSA similarity cutoff 0.72, re-scored `0.6·OSA + 0.4·JaroWinkler − length penalty`, accepted at ≥ 0.80 | 0.80–0.95 | `fuzzy` |
+
+---
+
+## Key flows
+
+### 1. Ingestion
+
+```
+ProductIn (Pydantic validation: whitespace collapse, EAN digits-only)
+  → point_id = uuid5(namespace, external_id)          # deterministic → idempotent upserts
+  → compose dense text (no codes) + sparse text (with codes)
+  → FastEmbed batch embedding (batch 64, off the event loop)
+  → Qdrant upsert (chunks of 256, wait=true)
+  → CodeIndex.add_product (incremental, thread-safe)
+```
+
+Re-ingesting the same `external_id` **replaces** the product (same point ID). `PUT` and `POST` converge on the same upsert path.
+
+### 2. Search — `text` query
+
+```
+"бездротовий пилосос для дому"
+  → classify: no code-like tokens → TEXT
+  → embed query (dense + sparse)
+  → Qdrant query_points:
+      prefetch: [dense (limit 50, filtered), sparse_text (limit 50, filtered)]
+      query:    FusionQuery(RRF)
+  → optional: cross-encoder rerank of top-50 (rerank=true)
+  → SearchResponse (branch = "hybrid")
+```
+
+### 3. Search — `code_only` query
+
+```
+"4006381333932"                       # EAN with a wrong check digit
+  → classify: single code-like token → CODE_ONLY
+  → CodeIndex.match: exact ✗ → skeleton ✗ → EAN candidates: {4006381333931✓}
+  → strong hit (score ≥ 0.95) → short-circuit, NO vector search at all (~3 ms)
+  → fetch payloads by point id, apply filters in-app
+  → SearchResponse (branch = "ean_corrected")
+```
+
+If only weak/fuzzy hits are found, the router **falls through** to hybrid search and pins the fuzzy code hits above the semantic results.
+
+### 4. Search — `mixed` query
+
+```
+"дриль GSB13RE з кейсом"
+  → classify: code tokens ["GSB13RE"] + text → MIXED
+  → branch A: CodeIndex.match("GSB13RE") → exact hit
+  → branch B: hybrid search over the full query (codes stay in the sparse text)
+  → merge: exact/skeleton/EAN hits pinned first, then fuzzy + hybrid interleaved (dedup by product)
+```
+
+### 5. File import
+
+```
+POST /api/v1/imports (multipart: file [+ column_mapping JSON])
+  → 202 Accepted { job_id }
+  → background: parse CSV/JSON/XLSX → map columns → validate rows → ingest in chunks of 200
+  → GET /api/v1/imports/{job_id} → { status, total, processed, failed, errors[≤100] }
+```
+
+Column mapping: explicit `column_mapping` > built-in aliases (`sku`/`артикул`→`article`, `ean`/`barcode`/`штрихкод`→`ean13`, `назва`/`название`→`name`, `ціна`/`цена`→`price`, …) > exact field name. Unknown columns land in `attributes`.
+
+### 6. Schema versioning / reindex
+
+A one-point companion collection `service_meta` records `{dense_model, dense_dim, sparse_model, schema_version}`. On startup the service compares it with the current config and **refuses to start** on mismatch — you can never silently mix vectors from different models. To reindex: drop the `products` and `service_meta` collections, restart, re-ingest.
+
+---
+
+## API contract
+
+Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
+
+**Authentication**: header `X-API-Key: <key>` on everything under `/api/v1`. Keys come from the `API_KEYS` env var (comma-separated, constant-time compared). An empty `API_KEYS` disables auth — dev only. `/health` and `/ready` are always open.
+
+| Method & path | Purpose | Success |
+|---|---|---|
+| `POST /api/v1/products` | Upsert one product | `200` → batch result |
+| `POST /api/v1/products:batch` | Upsert up to 1000 products | `200` → batch result |
+| `PUT /api/v1/products/{external_id}` | Full replace (body `external_id` must match path) | `200` |
+| `DELETE /api/v1/products/{external_id}` | Delete | `204`; `404` if absent |
+| `POST /api/v1/imports` | Start file import (multipart `file`, optional form field `column_mapping`) | `202` → job |
+| `GET /api/v1/imports/{job_id}` | Import progress | `200` → job |
+| `POST /api/v1/search` | Search | `200` → results |
+| `GET /health` | Liveness | always `200` |
+| `GET /ready` | Readiness (Qdrant reachable, models loaded, CodeIndex built) | `200` / `503` |
+
+Common errors: `401` invalid/missing API key, `422` validation error (Pydantic detail body), `400` rerank requested but disabled, `413` import file > 100 MB.
+
+### Product schema (`ProductIn`)
+
+```jsonc
+{
+  "external_id": "tool-001",         // required, ≤128 chars — stable ID in your system
+  "name": "Дриль ударний Bosch GSB 13 RE",  // required, ≤512 chars
+  "description": "…",                // optional, ≤10 000 chars
+  "brand": "Bosch",                  // optional
+  "category": "Електроінструмент",   // optional
+  "article": "GSB-13-RE",            // optional — SKU / артикул
+  "product_code": "060114E600",      // optional — internal product code
+  "ean13": "4006381333931",          // optional — non-digits are stripped
+  "attributes": {"Потужність": "600 Вт", "Патрон": "ШЗП 13 мм"},  // str|int|float|bool values
+  "price": 3299.0,                   // optional, ≥ 0
+  "currency": "UAH",                 // default "UAH"
+  "in_stock": true                   // default true
+}
+```
+
+### Search request (`SearchRequest`)
+
+```jsonc
+{
+  "query": "ударний дриль 600 Вт",   // required, 1–512 chars
+  "limit": 10,                        // 1–100, default 10
+  "offset": 0,
+  "rerank": false,                    // cross-encoder rerank of the hybrid branch
+  "filters": {                        // all optional, AND-combined
+    "brand": "Bosch",                 // case-insensitive
+    "category": "Електроінструмент",  // exact match
+    "price_min": 1000,
+    "price_max": 5000,
+    "in_stock": true,
+    "attributes": {"Патрон": "ШЗП 13 мм"}   // exact match per key
+  }
+}
+```
+
+Filters are applied inside the vector query (indexed payload fields) for the hybrid branch and in-app for code-branch hits.
+
+### Search response (`SearchResponse`)
+
+```jsonc
+{
+  "query_kind": "text",              // "code_only" | "mixed" | "text"
+  "took_ms": 42.1,
+  "total": 7,                         // matches found before offset/limit slicing
+  "items": [
+    {
+      "product": { /* full stored payload, incl. *_norm fields, updated_at, embed_model */ },
+      "score": 0.87,                  // RRF score (hybrid) or code score (code branches)
+      "match": {
+        "branch": "hybrid",           // exact | exact_normalized | ean_corrected | fuzzy | hybrid
+        "matched_field": null,        // article | product_code | ean13 (code branches)
+        "code_score": null,           // 0.80–1.00 for code branches
+        "reranked": false
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Request / response examples
+
+### Upsert a product
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/products \
@@ -65,89 +269,197 @@ curl -X POST http://localhost:8000/api/v1/products \
   }'
 ```
 
-### Приклад: пошук
+```json
+{"total": 1, "succeeded": 1, "failed": 0, "items": [{"external_id": "tool-001", "ok": true, "error": null}]}
+```
+
+### Exact article — answered from the code index in ~3 ms
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/search \
   -H "X-API-Key: change-me-secret-key" -H "Content-Type: application/json" \
-  -d '{
-    "query": "ударний дриль 600 Вт",
-    "limit": 10,
-    "rerank": false,
-    "filters": {"brand": "Bosch", "price_max": 5000, "in_stock": true}
-  }'
+  -d '{"query": "GSB-13-RE", "limit": 5}'
 ```
-
-Відповідь:
 
 ```json
 {
-  "query_kind": "text",
-  "took_ms": 42.1,
-  "total": 7,
+  "query_kind": "code_only",
+  "took_ms": 3.2,
+  "total": 1,
+  "items": [{
+    "product": {"external_id": "tool-001", "name": "Дриль ударний Bosch GSB 13 RE", "article": "GSB-13-RE", "...": "..."},
+    "score": 1.0,
+    "match": {"branch": "exact", "matched_field": "article", "code_score": 1.0, "reranked": false}
+  }]
+}
+```
+
+### Mistyped EAN-13 — checksum-aware correction
+
+```bash
+curl -X POST http://localhost:8000/api/v1/search \
+  -H "X-API-Key: change-me-secret-key" -H "Content-Type: application/json" \
+  -d '{"query": "4006381333932"}'
+```
+
+```json
+{
+  "query_kind": "code_only",
+  "took_ms": 2.9,
+  "items": [{
+    "product": {"external_id": "tool-001", "name": "Дриль ударний Bosch GSB 13 RE", "...": "..."},
+    "score": 0.95,
+    "match": {"branch": "ean_corrected", "matched_field": "ean13", "code_score": 0.95, "reranked": false}
+  }]
+}
+```
+
+### Mixed query — code hit pinned above semantic results
+
+```bash
+curl -X POST http://localhost:8000/api/v1/search \
+  -H "X-API-Key: change-me-secret-key" -H "Content-Type: application/json" \
+  -d '{"query": "дриль GSB13RE з кейсом", "limit": 3}'
+```
+
+```json
+{
+  "query_kind": "mixed",
+  "took_ms": 186.1,
   "items": [
-    {
-      "product": {"external_id": "tool-001", "name": "Дриль ударний Bosch GSB 13 RE", "...": "..."},
-      "score": 0.87,
-      "match": {"branch": "hybrid", "matched_field": null, "code_score": null, "reranked": false}
-    }
+    {"product": {"name": "Дриль ударний Bosch GSB 13 RE", "...": "..."}, "score": 1.0,
+     "match": {"branch": "exact", "matched_field": "article", "code_score": 1.0, "reranked": false}},
+    {"product": {"name": "Шуруповерт акумуляторний Makita DDF484Z", "...": "..."}, "score": 0.44,
+     "match": {"branch": "hybrid", "matched_field": null, "code_score": null, "reranked": false}}
   ]
 }
 ```
 
-## Архітектура
-
-```
-запит ──> classify()                        інжест ──> нормалізація ──> ембединги ──> Qdrant
-   │       │                                              │                              │
-   │       ├─ CODE_ONLY ─> CodeIndex (in-memory)          └─> CodeIndex.add (інкрементно)┘
-   │       │    exact → skeleton → EAN-fix → RapidFuzz
-   │       ├─ TEXT ──────> Qdrant query_points:
-   │       │    prefetch[dense, sparse] + RRF fusion (+опційний cross-encoder rerank)
-   │       └─ MIXED ─────> обидві гілки, exact-хіти піняться першими
-   └──────> SearchResponse з поясненням match.branch для кожного hit
-```
-
-- **Dense**: `intfloat/multilingual-e5-large` (FastEmbed/ONNX, CPU, 1024-dim, uk/ru/en).
-- **Sparse**: `Qdrant/bm25` (стемер russian; коди індексуються raw + нормалізовано).
-- **Фьюжн**: нативний RRF Qdrant (`query_points` + `prefetch`) — на боці БД.
-- **Коди**: dense-вектор коди не бачить (не шумлять у семантиці); sparse і CodeIndex — бачать.
-- **CodeIndex**: in-memory (≤100k товарів ×3 поля — десятки мс на повний fuzzy-прохід RapidFuzz);
-  відбудовується на старті payload-only scroll'ом, оновлюється інкрементно. Кожна репліка API
-  тримає власну копію — прийнятний компроміс для цього масштабу; JobStore імпорту теж in-memory
-  (single-instance).
-- **Версіонування схеми**: колекція `service_meta` зберігає модель/розмірність; при зміні конфігу
-  сервіс відмовляється стартувати і просить реіндексацію (видалити колекції та переінжестити).
-
-## Reranking (опційно)
+### File import
 
 ```bash
-uv sync --group rerank            # sentence-transformers + torch (CPU)
-RERANK_ENABLED=true               # у .env
-# у запиті: {"query": "...", "rerank": true}
+curl -X POST http://localhost:8000/api/v1/imports \
+  -H "X-API-Key: change-me-secret-key" \
+  -F "file=@catalog.csv" \
+  -F 'column_mapping={"Артикул виробника": "article", "Штрих-код": "ean13"}'
+# → 202 {"job_id": "3f2a…", "status": "pending", ...}
+
+curl -H "X-API-Key: change-me-secret-key" http://localhost:8000/api/v1/imports/3f2a…
+# → {"status": "completed", "total": 5000, "processed": 5000, "failed": 3, "errors": [...]}
 ```
 
-Cross-encoder `BAAI/bge-reranker-v2-m3` вантажиться ліниво при першому запиті. Дає найкращу
-якість на складних фразах (+50–200 мс). У FastEmbed цієї моделі немає, тому окрема група залежностей.
+---
 
-## Розробка
+## Deployment
+
+### Docker Compose (recommended)
+
+```bash
+cp .env.example .env        # set API_KEYS at minimum
+docker compose up -d --build
+```
+
+Two services:
+
+- **`qdrant`** — `qdrant/qdrant:v1.17.1`, storage in the `qdrant_data` volume, dashboard at http://localhost:6333/dashboard.
+- **`api`** — this service, port 8000. Embedding models (~2.2 GB) are downloaded **once** on first start into the `model_cache` volume (`FASTEMBED_CACHE_PATH=/models`, `HF_HOME=/models/hf`); subsequent starts take seconds. Healthcheck allows up to ~5 min of start time for the first download.
+
+Wait for readiness, then run the demo:
+
+```bash
+curl http://localhost:8000/ready
+# {"status":"ready","indexed_code_points":38}
+
+uv run python scripts/smoke_search.py   # ingests data/sample_products.json + runs every query type
+```
+
+The Docker image is a multi-stage build: dependencies resolved by `uv sync --frozen` from `uv.lock`, runtime is `python:3.13-slim` running as a non-root user.
+
+### First catalog load
+
+CPU embedding throughput for `multilingual-e5-large` is roughly 10–30 products/s — a 100k catalog takes 1–3 hours **once**. Options:
+
+- push in batches of ≤1000 via `POST /api/v1/products:batch` (the observed rate: 38 products ≈ 14 s cold),
+- or upload a single CSV/XLSX/JSON via `POST /api/v1/imports` and poll the job.
+
+Pre-warm the model cache without starting the API: `uv run python scripts/download_models.py`.
+
+### Scaling notes
+
+- ≤100k products fit comfortably on a single Qdrant node with vectors in RAM (~410 MB dense); no quantization needed. Binary/scalar quantization and Qdrant clustering are the escalation path beyond ~1M.
+- The API is stateless **except** for the in-memory CodeIndex (rebuilt from a payload-only scroll at startup, updated incrementally) and the import JobStore. Multiple replicas each hold their own CodeIndex copy — fine at this scale; ingest through one replica or rebuild others periodically if you shard writes.
+
+---
+
+## Configuration
+
+All settings via environment / `.env` (see `.env.example`, parsed by pydantic-settings — `app/core/config.py`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
+| `QDRANT_API_KEY` | — | Qdrant API key (if secured) |
+| `COLLECTION_NAME` | `products` | main collection |
+| `API_KEYS` | — | comma-separated API keys; **empty disables auth** |
+| `DENSE_MODEL` | `intfloat/multilingual-e5-large` | FastEmbed dense model |
+| `DENSE_DIM` | `1024` | must match the model |
+| `SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed sparse model |
+| `SPARSE_LANGUAGE` | `russian` | BM25 stemmer language |
+| `EMBED_BATCH_SIZE` / `UPSERT_BATCH_SIZE` | `64` / `256` | pipeline batching |
+| `PREFETCH_LIMIT` | `50` | per-branch candidate pool for RRF |
+| `RERANK_ENABLED` | `false` | allow `rerank=true` requests |
+| `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | cross-encoder model |
+| `RERANK_TOP_K` | `50` | how many hybrid hits get reranked |
+| `DEBUG` | `false` | debug logging |
+
+Changing `DENSE_MODEL`/`DENSE_DIM`/`SPARSE_MODEL` against an existing collection triggers the `service_meta` guard: the service exits with a clear reindex instruction instead of mixing incompatible vectors.
+
+### Optional reranking
+
+```bash
+uv sync --group rerank      # sentence-transformers + torch (CPU) — heavy, hence optional
+# .env: RERANK_ENABLED=true
+# request: {"query": "...", "rerank": true}
+```
+
+Best quality on long/ambiguous phrases, +50–200 ms when enabled. Requesting `rerank=true` while disabled returns `400`.
+
+---
+
+## Development
 
 ```bash
 uv sync --group dev
-uv run pytest -q                  # unit-тести (Qdrant/моделі не потрібні)
-uv run pytest -m integration -q   # e2e проти піднятого compose
+uv run pytest -q                            # 45 unit tests — no Qdrant/models needed
+uv run pytest -m integration -q -o addopts="" # 13 e2e tests against a running compose stack
 uv run ruff check app tests scripts
+uv run python scripts/gen_sample_data.py    # regenerate data/sample_products.json (valid EAN-13s)
 ```
 
-Файловий імпорт: колонки мапляться на поля `ProductIn` (aliases: `sku`/`артикул`→article,
-`ean`/`штрихкод`→ean13, `назва`→name …), невідомі колонки потрапляють у `attributes`.
-Явний мапінг: form-поле `column_mapping` = `{"Колонка з файла": "article"}`.
+Layout:
 
-### Відомі особливості
+```
+app/
+├── main.py            # app factory + lifespan (model warmup, collection init, CodeIndex bootstrap)
+├── core/              # settings (pydantic-settings), X-API-Key auth, logging
+├── models/            # Pydantic v2 schemas: product, search, imports
+├── api/v1/            # routers: products, search, imports, health
+└── services/          # the engine (see Components table above)
+scripts/               # gen_sample_data, download_models, smoke_search
+tests/unit             # normalization, EAN, code index, query classification
+tests/integration      # full e2e over HTTP (marker: integration)
+```
 
-- Перший інжест великого каталогу повільний: e5-large на CPU ≈ 10–30 товарів/с (100k ≈ 1–3 год,
-  одноразово). Прогрів моделей у volume: `uv run python scripts/download_models.py`.
-- Український стемінг у BM25 відсутній (використовується russian) — компенсується dense-моделлю
-  через RRF.
-- Windows-хост для локального запуску embedding-стека нестабільний (onnxruntime DLL) — цільовий
-  рантайм: Docker. Unit-тести від ONNX не залежать.
+Unit tests never import ONNX (the FastEmbed import is deferred into `EmbeddingService.__init__`), so they run anywhere in ~2 s.
+
+---
+
+## Design decisions & limitations
+
+- **App-side fuzzy index instead of Qdrant trigram vectors.** At ≤100k products × 3 code fields, RapidFuzz's C++ batch scan finishes in tens of milliseconds, models edit distance directly (trigram overlap does not), and keeps the collection schema to two vectors. Trade-off: per-replica memory copy + startup scroll.
+- **RRF over weighted score blending.** Rank fusion needs no per-domain weight tuning and is computed server-side by Qdrant in one round trip.
+- **Codes excluded from the dense vector, included in the sparse one.** Semantic vectors stay clean; lexical code matching still works inside the hybrid branch.
+- **Ukrainian stemming** does not exist in FastEmbed's BM25; the Russian stemmer + verbatim token matching is used, and the dense model carries most of the Ukrainian semantics through RRF.
+- **`bge-m3` is not shipped by FastEmbed 0.8** — `multilingual-e5-large` is the strongest multilingual dense model in its catalog and is used by default; the model-profile abstraction makes swapping trivial (with a mandatory reindex, enforced by `service_meta`).
+- **In-memory import JobStore** — single-instance assumption; move to Redis/DB if you scale the API horizontally and need durable jobs.
+- **Windows host note:** the ONNX embedding stack is flaky on bare Windows (MSVC runtime conflicts); the supported runtime is Docker. Unit tests are unaffected.
