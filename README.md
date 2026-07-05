@@ -178,7 +178,12 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 | `PUT /api/v1/products/{external_id}` | Full replace (body `external_id` must match path) | `200` |
 | `PATCH /api/v1/products/{external_id}/price` | Update only price / availability — no re-embedding | `200`; `404` if absent |
 | `POST /api/v1/products:prices` | Bulk price / availability update (≤1000, partial success) | `200` → batch result |
-| `DELETE /api/v1/products/{external_id}` | Delete | `204`; `404` if absent |
+| `POST /api/v1/products:archive` | Bulk archive (hide, retain) or restore (`archived:false`) | `200` → batch result |
+| `POST /api/v1/products:delete` | Bulk hard delete (partial success) | `200` → batch result |
+| `POST /api/v1/products:reconcile` | Snapshot sync: archive everything not in `external_ids` (dry-run + cap) | `200`; `400` past cap |
+| `POST /api/v1/products:diff` | Drift report vs a snapshot (no mutation) | `200` |
+| `GET /api/v1/products/stats` | `{total, active, archived}` | `200` |
+| `DELETE /api/v1/products/{external_id}` | Delete one | `204`; `404` if absent |
 | `POST /api/v1/imports` | Start file import (multipart `file`, optional form field `column_mapping`) | `202` → job |
 | `GET /api/v1/imports/{job_id}` | Import progress | `200` → job |
 | `POST /api/v1/search` | Search | `200` → results |
@@ -189,6 +194,24 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 Common errors: `401` invalid/missing API key, `422` validation error (Pydantic detail body), `400` rerank requested but disabled, `413` import file > 100 MB.
 
 **Price / availability updates.** A full upsert re-runs the whole heavy pipeline (LLM enrichment + dense/sparse embedding), which is wasted work when only `price`, `in_stock` or `currency` change — those fields are not embedded. Use `PATCH /products/{id}/price` (single) or `POST /products:prices` (bulk) instead: they patch the Qdrant payload directly (`set_payload`, vectors untouched, CodeIndex untouched), completing in milliseconds. Body is a `PriceUpdate` — `external_id` plus at least one of `price` / `in_stock` / `currency`; only the provided fields change, and `updated_at` is bumped. The bulk endpoint is partial-success: unknown `external_id`s come back as failed items (`"Product not found"`) rather than failing the batch.
+
+### Catalog sync (keeping the index in step with your source of truth)
+
+An upstream system (PIM / ERP / 1C) owns the catalog; this service is a downstream search/RAG index that must be kept in sync. Three lifecycle levers, deliberately orthogonal:
+
+- **`in_stock`** — buyable right now? Toggle via `:prices`. The product stays searchable and shows as unavailable.
+- **`status = archived`** — temporarily out of the catalog: hidden from search by default, **retained** (vectors kept), reversible. Set via `POST /products:archive` (`archived:true`) / restore with `archived:false`, or fetch anyway with `include_archived:true` on `/search`.
+- **delete** — gone for good, vectors removed. `DELETE /products/{id}` or bulk `POST /products:delete`.
+
+**Re-push everything, cheaply.** `:batch` stores a `content_hash` of each product's embedding-affecting fields (name/description/brand/category/codes/attributes). Re-uploading a product whose searchable content didn't change **skips embedding and enrichment** entirely and just refreshes the payload — so a nightly full re-push only pays the LLM/ONNX cost for what actually changed. Force a re-embed (e.g. after changing the enrichment prompt) with `REEMBED_UNCHANGED=true`.
+
+**Removing what the source forgot to delete (orphans).** If a delete event is lost, the index keeps a product the source no longer has. `POST /products:reconcile` fixes drift from a snapshot: send the full list of currently-valid `external_id`s, and everything **not** in it is **archived** (never deleted — a truncated snapshot is recoverable). Safety rails: `dry_run` (default `true`) reports what *would* be archived without touching anything, and `max_archived` refuses the run (400) if it would archive more than N products — so a broken source feed can't wipe the catalog. `POST /products:diff` gives the same drift report (`missing_in_index` / `extra_in_index`) with no mutation, and `GET /products/stats` returns `{total, active, archived}` for a cheap divergence check.
+
+```bash
+# nightly full sync from the source of truth:
+POST /api/v1/products:batch      { "items": [ ...whole catalog... ] }   # adds/updates; unchanged skip embedding
+POST /api/v1/products:reconcile  { "external_ids": [...all valid ids...], "dry_run": false, "max_archived": 5000 }
+```
 
 ### Product schema (`ProductIn`)
 

@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AttrValue = str | int | float | bool
+
+# Bulk lifecycle ops take just external_ids — a full-catalog snapshot fits in one request.
+MAX_IDS_PER_REQUEST = 100_000
+# Targeted bulk mutations (archive/delete) are smaller working sets.
+MAX_MUTATION_IDS = 10_000
+
+
+class ProductStatus(StrEnum):
+    ACTIVE = "active"  # in the catalog and searchable
+    ARCHIVED = "archived"  # retained (vectors kept) but hidden from default search
 
 
 class ProductIn(BaseModel):
@@ -92,3 +103,49 @@ class BatchUpsertResult(BaseModel):
     succeeded: int
     failed: int
     items: list[BatchItemResult]
+
+
+# --- catalog sync / lifecycle ---
+
+
+class ArchiveRequest(BaseModel):
+    external_ids: list[str] = Field(min_length=1, max_length=MAX_MUTATION_IDS)
+    archived: bool = Field(default=True, description="true = archive (hide); false = restore")
+
+
+class DeleteRequest(BaseModel):
+    external_ids: list[str] = Field(min_length=1, max_length=MAX_MUTATION_IDS)
+
+
+class ReconcileRequest(BaseModel):
+    """Snapshot reconciliation: everything NOT in `external_ids` is archived (never
+    deleted). `dry_run` (default) reports what would change without mutating.
+    `max_archived` refuses the run if it would archive more than N products — a guard
+    against a buggy source sending a truncated snapshot."""
+
+    external_ids: list[str] = Field(min_length=1, max_length=MAX_IDS_PER_REQUEST)
+    dry_run: bool = True
+    max_archived: int | None = Field(default=None, ge=0)
+
+
+class ReconcileResult(BaseModel):
+    dry_run: bool
+    archived_count: int
+    external_ids: list[str]  # the products archived (or that would be, when dry_run)
+
+
+class DiffRequest(BaseModel):
+    external_ids: list[str] = Field(min_length=1, max_length=MAX_IDS_PER_REQUEST)
+
+
+class DiffResult(BaseModel):
+    missing_in_index: list[str]  # source has them, the index does not (need ingest)
+    extra_in_index: list[str]  # index has them, source does not (candidates to archive)
+    missing_count: int
+    extra_count: int
+
+
+class CatalogStats(BaseModel):
+    total: int
+    active: int
+    archived: int

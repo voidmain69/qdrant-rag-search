@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.product import PriceUpdate, ProductIn
+from app.models.product import PriceUpdate, ProductIn, ReconcileRequest
 from app.models.search import SearchRequest
 
 
@@ -40,6 +40,20 @@ class TestPriceUpdate:
     def test_stock_false_is_a_valid_change(self):
         # in_stock=False must not be mistaken for "field absent"
         assert PriceUpdate(external_id="x", in_stock=False).changed_fields() == {"in_stock": False}
+
+
+class TestReconcileRequest:
+    def test_dry_run_defaults_true(self):
+        # safety default: reconcile never mutates unless explicitly told to
+        assert ReconcileRequest(external_ids=["a"]).dry_run is True
+
+    def test_empty_ids_rejected(self):
+        with pytest.raises(ValidationError):
+            ReconcileRequest(external_ids=[])
+
+    def test_negative_cap_rejected(self):
+        with pytest.raises(ValidationError):
+            ReconcileRequest(external_ids=["a"], max_archived=-1)
 
 
 class TestSearchRequest:

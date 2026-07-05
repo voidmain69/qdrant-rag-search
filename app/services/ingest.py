@@ -1,27 +1,60 @@
-"""Ingestion pipeline: normalize → embed (batched) → upsert → update CodeIndex."""
+"""Ingestion pipeline: normalize → embed (batched) → upsert → update CodeIndex,
+plus catalog-sync operations (archive / delete / reconcile / diff / stats)."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import orjson
+from fastapi import HTTPException
 from qdrant_client import models
 
 from app.core.config import Settings
-from app.models.product import BatchItemResult, BatchUpsertResult, PriceUpdate, ProductIn
+from app.models.product import (
+    BatchItemResult,
+    BatchUpsertResult,
+    CatalogStats,
+    DiffResult,
+    PriceUpdate,
+    ProductIn,
+    ProductStatus,
+    ReconcileResult,
+)
 from app.services.code_index import CodeIndex
 from app.services.embedding import EmbeddingService
 from app.services.enrichment import Enrichment, ProductEnrichmentService
 from app.services.normalization import compose_dense_text, compose_sparse_text, norm_code
-from app.services.qdrant import QdrantService
+from app.services.qdrant import QdrantService, archived_filter
 from app.utils.ids import point_id_for
 
 logger = logging.getLogger(__name__)
 
+# fields that feed the dense/sparse embedding text — changing any of them invalidates
+# the stored vectors; price/stock/currency/status do not appear here (payload-only)
+_CONTENT_FIELDS = (
+    "name",
+    "description",
+    "brand",
+    "category",
+    "article",
+    "product_code",
+    "ean13",
+    "attributes",
+)
+
+
+def content_hash(product: ProductIn) -> str:
+    """Stable hash of the embedding-affecting fields, used to skip re-embedding a
+    product whose searchable content did not change."""
+    canonical = orjson.dumps({f: getattr(product, f) for f in _CONTENT_FIELDS}, option=orjson.OPT_SORT_KEYS)
+    return hashlib.sha256(canonical).hexdigest()
+
 
 def build_payload(
-    product: ProductIn, dense_model: str, enrichment: Enrichment | None = None
+    product: ProductIn, dense_model: str, enrichment: Enrichment | None, hash_: str
 ) -> dict[str, Any]:
     # product-provided attributes always win: supplier data is ground truth,
     # LLM enrichment only fills gaps
@@ -42,17 +75,18 @@ def build_payload(
         "price": product.price,
         "currency": product.currency,
         "in_stock": product.in_stock,
+        "status": ProductStatus.ACTIVE.value,  # present in a batch ⇒ active
+        "content_hash": hash_,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "embed_model": dense_model,
     }
     if enrichment is not None:
-        enrichment_block: dict[str, Any] = {
+        payload["enrichment"] = {
             "normalized_title": enrichment.normalized_title,
             "synonyms": list(enrichment.synonyms),
             "use_cases": list(enrichment.use_cases),
             "spec_summary": enrichment.spec_summary,
         }
-        payload["enrichment"] = enrichment_block
     return payload
 
 
@@ -72,13 +106,58 @@ class IngestService:
         self.enricher = enricher
 
     async def upsert_products(self, items: list[ProductIn]) -> BatchUpsertResult:
-        """Embed and upsert a batch. The pipeline is all-or-nothing: any failure raises
-        (→ HTTP 5xx) and no partial per-item results are produced."""
+        """Add/update products. Re-embeds only those whose searchable content changed
+        (content-hash short-circuit) — an unchanged re-push just refreshes the payload
+        and re-activates the product. The pipeline is all-or-nothing: any failure raises."""
         # last write wins for duplicated external_ids inside one batch
         unique: dict[str, ProductIn] = {p.external_id: p for p in items}
         products = list(unique.values())
         point_ids = [point_id_for(p.external_id) for p in products]
+        hashes = [content_hash(p) for p in products]
 
+        stored = await self.qdrant.retrieve_payloads(point_ids)
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+
+        # split into "content changed / new" (needs embedding) vs "unchanged" (payload only)
+        to_embed: list[tuple[ProductIn, str, str]] = []  # (product, point_id, hash)
+        to_refresh: list[tuple[ProductIn, str]] = []  # (product, point_id)
+        for product, pid, hash_ in zip(products, point_ids, hashes, strict=True):
+            prev = stored.get(pid)
+            if not self.settings.reembed_unchanged and prev is not None and prev.get("content_hash") == hash_:
+                to_refresh.append((product, pid))
+            else:
+                to_embed.append((product, pid, hash_))
+
+        await self._embed_and_upsert(to_embed)
+        for product, pid in to_refresh:
+            await self.qdrant.set_payload(
+                pid,
+                {
+                    "price": product.price,
+                    "currency": product.currency,
+                    "in_stock": product.in_stock,
+                    "status": ProductStatus.ACTIVE.value,
+                    "updated_at": now,
+                },
+            )
+
+        # keep the code index consistent (idempotent; also re-activates a restored product)
+        for product, pid in zip(products, point_ids, strict=True):
+            self.code_index.add_product(
+                pid,
+                {"article": product.article, "product_code": product.product_code, "ean13": product.ean13},
+            )
+
+        if to_refresh:
+            logger.info("upsert: %d embedded, %d unchanged (payload-only)", len(to_embed), len(to_refresh))
+
+        results = [BatchItemResult(external_id=p.external_id, ok=True) for p in items]
+        return BatchUpsertResult(total=len(results), succeeded=len(results), failed=0, items=results)
+
+    async def _embed_and_upsert(self, batch: list[tuple[ProductIn, str, str]]) -> None:
+        if not batch:
+            return
+        products = [b[0] for b in batch]
         enrichments: list[Enrichment | None]
         if self.enricher is not None:
             enrichments = await self.enricher.enrich_all(products)
@@ -93,35 +172,23 @@ class IngestService:
             models.PointStruct(
                 id=pid,
                 vector={"dense": dv, "sparse_text": sv},
-                payload=build_payload(p, self.settings.dense_model, e),
+                payload=build_payload(product, self.settings.dense_model, enrichment, hash_),
             )
-            for p, pid, dv, sv, e in zip(
-                products, point_ids, dense_vecs, sparse_vecs, enrichments, strict=True
+            for (product, pid, hash_), enrichment, dv, sv in zip(
+                batch, enrichments, dense_vecs, sparse_vecs, strict=True
             )
         ]
-
-        batch = self.settings.upsert_batch_size
-        for start in range(0, len(points), batch):
-            await self.qdrant.upsert_points(points[start : start + batch])
-
-        for p, pid in zip(products, point_ids, strict=True):
-            self.code_index.add_product(
-                pid,
-                {"article": p.article, "product_code": p.product_code, "ean13": p.ean13},
-            )
-
-        results = [BatchItemResult(external_id=p.external_id, ok=True) for p in items]
-        return BatchUpsertResult(total=len(results), succeeded=len(results), failed=0, items=results)
+        size = self.settings.upsert_batch_size
+        for start in range(0, len(points), size):
+            await self.qdrant.upsert_points(points[start : start + size])
 
     async def update_prices(self, updates: list[PriceUpdate]) -> BatchUpsertResult:
         """Payload-only update of price / availability. No embedding and no CodeIndex
         change — vectors and codes are unaffected by price/stock, so this skips the whole
         heavy ingest pipeline. Partial success: unknown external_ids are reported failed,
         not fatal (a price feed routinely references products not in this catalog)."""
-        # last write wins for duplicated external_ids inside one batch
         unique: dict[str, PriceUpdate] = {u.external_id: u for u in updates}
-        point_ids = {point_id_for(eid): eid for eid in unique}
-        existing = await self.qdrant.retrieve_existing(list(point_ids))
+        existing = await self.qdrant.retrieve_existing([point_id_for(eid) for eid in unique])
         now = datetime.now(UTC).isoformat(timespec="seconds")
 
         results: list[BatchItemResult] = []
@@ -131,11 +198,87 @@ class IngestService:
                 continue
             await self.qdrant.set_payload(point_id_for(eid), {**update.changed_fields(), "updated_at": now})
             results.append(BatchItemResult(external_id=eid, ok=True))
+        return _batch_result(results)
 
-        succeeded = sum(1 for r in results if r.ok)
-        return BatchUpsertResult(
-            total=len(results), succeeded=succeeded, failed=len(results) - succeeded, items=results
+    async def set_archived(self, external_ids: list[str], archived: bool) -> BatchUpsertResult:
+        """Archive (hide, retain) or restore products — payload-only, reversible, vectors
+        and codes untouched. Unknown external_ids are reported failed, not fatal."""
+        status = ProductStatus.ARCHIVED if archived else ProductStatus.ACTIVE
+        unique = list(dict.fromkeys(external_ids))
+        existing = await self.qdrant.retrieve_existing([point_id_for(eid) for eid in unique])
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+
+        results: list[BatchItemResult] = []
+        for eid in unique:
+            if point_id_for(eid) not in existing:
+                results.append(BatchItemResult(external_id=eid, ok=False, error="Product not found"))
+                continue
+            await self.qdrant.set_payload(point_id_for(eid), {"status": status.value, "updated_at": now})
+            results.append(BatchItemResult(external_id=eid, ok=True))
+        return _batch_result(results)
+
+    async def delete_products(self, external_ids: list[str]) -> BatchUpsertResult:
+        """Bulk hard delete — the only destructive operation. Removes vectors and code
+        index entries. Unknown external_ids are reported failed, not fatal."""
+        unique = list(dict.fromkeys(external_ids))
+        existing = await self.qdrant.retrieve_existing([point_id_for(eid) for eid in unique])
+        to_delete = [point_id_for(eid) for eid in unique if point_id_for(eid) in existing]
+        await self.qdrant.delete_points(to_delete)
+        for pid in to_delete:
+            self.code_index.remove_product(pid)
+        results = [
+            BatchItemResult(
+                external_id=eid,
+                ok=point_id_for(eid) in existing,
+                error=None if point_id_for(eid) in existing else "Product not found",
+            )
+            for eid in unique
+        ]
+        return _batch_result(results)
+
+    async def reconcile(
+        self, external_ids: list[str], dry_run: bool, max_archived: int | None
+    ) -> ReconcileResult:
+        """Snapshot reconciliation: archive every stored product NOT in `external_ids`
+        (orphans left over from lost delete events). Never deletes — archiving is
+        reversible, so a truncated snapshot is recoverable. `max_archived` refuses the
+        run if it would archive too many, guarding against a broken source feed."""
+        snapshot = set(external_ids)
+        stored = await self.qdrant.all_external_ids_status()
+        orphans = [
+            eid for eid, status in stored if eid not in snapshot and status != ProductStatus.ARCHIVED.value
+        ]
+        if max_archived is not None and len(orphans) > max_archived:
+            raise HTTPException(
+                status_code=400,
+                detail=f"reconcile would archive {len(orphans)} products (> max_archived={max_archived}); "
+                "refusing — check the source snapshot is complete.",
+            )
+        if not dry_run:
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            for eid in orphans:
+                await self.qdrant.set_payload(
+                    point_id_for(eid), {"status": ProductStatus.ARCHIVED.value, "updated_at": now}
+                )
+        return ReconcileResult(dry_run=dry_run, archived_count=len(orphans), external_ids=orphans)
+
+    async def diff(self, external_ids: list[str]) -> DiffResult:
+        """Report drift between the source snapshot and the index without mutating."""
+        snapshot = set(external_ids)
+        stored = {eid for eid, _ in await self.qdrant.all_external_ids_status()}
+        missing = sorted(snapshot - stored)
+        extra = sorted(stored - snapshot)
+        return DiffResult(
+            missing_in_index=missing,
+            extra_in_index=extra,
+            missing_count=len(missing),
+            extra_count=len(extra),
         )
+
+    async def stats(self) -> CatalogStats:
+        total = await self.qdrant.count()
+        archived = await self.qdrant.count(archived_filter())
+        return CatalogStats(total=total, active=total - archived, archived=archived)
 
     async def delete_product(self, external_id: str) -> bool:
         point_id = point_id_for(external_id)
@@ -143,3 +286,10 @@ class IngestService:
         if deleted:
             self.code_index.remove_product(point_id)
         return deleted
+
+
+def _batch_result(results: list[BatchItemResult]) -> BatchUpsertResult:
+    succeeded = sum(1 for r in results if r.ok)
+    return BatchUpsertResult(
+        total=len(results), succeeded=succeeded, failed=len(results) - succeeded, items=results
+    )

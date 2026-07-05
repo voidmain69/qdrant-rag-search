@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     sparse_language: str = "russian"
     embed_batch_size: int = 64
     upsert_batch_size: int = 256
+    # re-upsert of a product whose searchable content is unchanged skips the (expensive)
+    # embedding + enrichment and only refreshes the payload; set true to always re-embed
+    # (e.g. after changing the enrichment prompt/model)
+    reembed_unchanged: bool = False
 
     rerank_enabled: bool = False
     rerank_model: str = "BAAI/bge-reranker-v2-m3"

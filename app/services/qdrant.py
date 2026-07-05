@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.core.config import Settings
+from app.models.product import ProductStatus
 from app.models.search import SearchFilters
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,14 @@ async def _with_retry[T](op: Callable[[], Awaitable[T]], what: str) -> T:
     raise AssertionError("unreachable")
 
 
-PAYLOAD_KEYWORD_INDEXES = ["article_norm", "product_code_norm", "ean13", "brand_norm", "category"]
+PAYLOAD_KEYWORD_INDEXES = [
+    "article_norm",
+    "product_code_norm",
+    "ean13",
+    "brand_norm",
+    "category",
+    "status",
+]
 
 CODE_PAYLOAD_FIELDS = ["article", "product_code", "ean13"]
 
@@ -162,13 +170,17 @@ class QdrantService:
         )
         if not existing:
             return False
+        await self.delete_points([point_id])
+        return True
+
+    async def delete_points(self, point_ids: list[str]) -> None:
+        if not point_ids:
+            return
+        selector = models.PointIdsList(points=cast("list[models.ExtendedPointId]", point_ids))
         await _with_retry(
-            lambda: self.client.delete(
-                self.collection, points_selector=models.PointIdsList(points=[point_id]), wait=True
-            ),
+            lambda: self.client.delete(self.collection, points_selector=selector, wait=True),
             "delete",
         )
-        return True
 
     # --- read path ---
 
@@ -226,8 +238,36 @@ class QdrantService:
             if offset is None:
                 return
 
-    async def count(self) -> int:
-        result = await self.client.count(self.collection, exact=True)
+    async def all_external_ids_status(self) -> list[tuple[str, str | None]]:
+        """Every stored product as (external_id, status) — payload-only scroll for
+        reconcile/diff/stats. Fine to materialize at catalog scale (≤ ~100k)."""
+        out: list[tuple[str, str | None]] = []
+        offset = None
+        while True:
+            current_offset = offset
+            points, offset = await _with_retry(
+                lambda: self.client.scroll(
+                    self.collection,
+                    limit=1000,
+                    offset=current_offset,  # noqa: B023 — invoked immediately by _with_retry
+                    with_payload=["external_id", "status"],
+                    with_vectors=False,
+                ),
+                "scroll",
+            )
+            for p in points:
+                payload = p.payload or {}
+                external_id = payload.get("external_id")
+                if external_id:
+                    out.append((str(external_id), payload.get("status")))
+            if offset is None:
+                return out
+
+    async def count(self, count_filter: models.Filter | None = None) -> int:
+        result = await _with_retry(
+            lambda: self.client.count(self.collection, count_filter=count_filter, exact=True),
+            "count",
+        )
         return result.count
 
     async def ping(self) -> bool:
@@ -239,10 +279,24 @@ class QdrantService:
             return False
 
 
-def build_filter(filters: SearchFilters | None) -> models.Filter | None:
-    if filters is None:
-        return None
+ARCHIVED_CONDITION = models.FieldCondition(
+    key="status", match=models.MatchValue(value=ProductStatus.ARCHIVED.value)
+)
+
+
+def archived_filter() -> models.Filter:
+    """Count filter for archived products."""
+    return models.Filter(must=[ARCHIVED_CONDITION])
+
+
+def build_filter(filters: SearchFilters | None, include_archived: bool = False) -> models.Filter | None:
+    """Build a Qdrant filter from user filters. Unless `include_archived`, archived
+    products are excluded via must_not — legacy points without a `status` field are
+    treated as active, so the exclusion is safe on a not-yet-migrated collection."""
     must: list[models.Condition] = []
+    must_not: list[models.Condition] = [] if include_archived else [ARCHIVED_CONDITION]
+    if filters is None:
+        return models.Filter(must_not=must_not) if must_not else None
     if filters.brand:
         must.append(
             models.FieldCondition(key="brand_norm", match=models.MatchValue(value=filters.brand.lower()))
@@ -265,11 +319,17 @@ def build_filter(filters: SearchFilters | None) -> models.Filter | None:
             )
         else:
             must.append(models.FieldCondition(key=f"attributes.{key}", match=models.MatchValue(value=value)))
-    return models.Filter(must=must) if must else None
+    if not must and not must_not:
+        return None
+    return models.Filter(must=must or None, must_not=must_not or None)
 
 
-def payload_matches_filters(payload: dict[str, Any], filters: SearchFilters | None) -> bool:
+def payload_matches_filters(
+    payload: dict[str, Any], filters: SearchFilters | None, include_archived: bool = False
+) -> bool:
     """In-app filter check for code-branch hits (they bypass Qdrant's vector query)."""
+    if not include_archived and payload.get("status") == ProductStatus.ARCHIVED.value:
+        return False
     if filters is None:
         return True
     if filters.brand and (payload.get("brand_norm") or "") != filters.brand.lower():

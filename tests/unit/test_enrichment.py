@@ -5,7 +5,7 @@ from app.core.config import Settings
 from app.models.product import ProductIn
 from app.services.coverage import fallback_requirements, requirements_coverage
 from app.services.enrichment import Enrichment, ProductEnrichmentService, parse_enrichment
-from app.services.ingest import build_payload
+from app.services.ingest import build_payload as _build_payload
 from app.services.llm import OllamaClient
 from app.services.normalization import compose_dense_text, compose_sparse_text
 
@@ -35,6 +35,11 @@ LLM_ANSWER = {
 
 def make_settings(**kwargs) -> Settings:
     return Settings(_env_file=None, **kwargs)
+
+
+def build_payload(product, dense_model, enrichment):
+    """Test shim that supplies the content_hash argument."""
+    return _build_payload(product, dense_model, enrichment, "test-hash")
 
 
 class TestParseEnrichment:

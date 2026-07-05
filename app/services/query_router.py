@@ -169,7 +169,7 @@ class SearchService:
         items: list[SearchHit] = []
         for hit in hits:
             payload = payloads.get(hit.point_id)
-            if payload is None or not payload_matches_filters(payload, req.filters):
+            if payload is None or not payload_matches_filters(payload, req.filters, req.include_archived):
                 continue
             items.append(
                 SearchHit(
@@ -185,7 +185,7 @@ class SearchService:
     async def _hybrid_search(self, req: SearchRequest, cls: QueryClassification) -> list[SearchHit]:
         sparse_text = compose_sparse_query(req.query, cls.code_tokens)
         dense_vec, sparse_vec = await self.embedder.aembed_query(req.query, sparse_text)
-        flt = build_filter(req.filters)
+        flt = build_filter(req.filters, req.include_archived)
         fetch = max(self.settings.prefetch_limit, req.offset + req.limit)
         points = await self.qdrant.hybrid_query(dense_vec, sparse_vec, flt, limit=fetch)
         items = [

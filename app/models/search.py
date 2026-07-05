@@ -45,6 +45,7 @@ class SearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
     rerank: bool = False
     mode: SearchMode = SearchMode.RELAXED
+    include_archived: bool = False  # archived products are hidden from search by default
     filters: SearchFilters | None = None
 
 

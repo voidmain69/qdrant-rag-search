@@ -180,6 +180,102 @@
       ]
     },
     {
+      "name": "Catalog sync",
+      "description": "Keep the index in step with your source of truth: archive (hide, retain), bulk delete, snapshot reconcile (archives orphans, never deletes), drift diff, and stats.",
+      "item": [
+        {
+          "name": "Archive / restore products",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_ids\": [\"tool-002\", \"tool-003\"],\n  \"archived\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:archive",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:archive"]
+            },
+            "description": "archived:true hides products from default search (retained, reversible). archived:false restores them. Payload-only; vectors kept."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk delete products",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_ids\": [\"tool-999\", \"tool-998\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:delete",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:delete"]
+            },
+            "description": "Permanent — removes vectors. Partial success: unknown ids come back as failed items."
+          },
+          "response": []
+        },
+        {
+          "name": "Reconcile (snapshot sync)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_ids\": [\"tool-001\", \"tool-002\", \"tool-003\"],\n  \"dry_run\": true,\n  \"max_archived\": 5000\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:reconcile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:reconcile"]
+            },
+            "description": "Send the full set of currently-valid external_ids; everything NOT in it is archived (never deleted). dry_run:true (default) reports what would be archived without mutating. max_archived refuses the run (400) if it would archive more than N — set dry_run:false to apply."
+          },
+          "response": []
+        },
+        {
+          "name": "Diff (drift report)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_ids\": [\"tool-001\", \"tool-002\", \"tool-003\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:diff",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:diff"]
+            },
+            "description": "No mutation. Returns { missing_in_index (source has, index lacks), extra_in_index (index has, source lacks) }."
+          },
+          "response": []
+        },
+        {
+          "name": "Catalog stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "stats"]
+            },
+            "description": "{ total, active, archived } — a cheap divergence check for the source."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Imports",
       "item": [
         {
