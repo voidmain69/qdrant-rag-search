@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.product import ProductIn
+from app.models.product import PriceUpdate, ProductIn
 from app.models.search import SearchRequest
 
 
@@ -18,6 +18,28 @@ class TestProductIn:
     def test_whitespace_only_external_id_rejected(self):
         with pytest.raises(ValidationError):
             ProductIn(external_id="   ", name="y")
+
+
+class TestPriceUpdate:
+    def test_empty_update_rejected(self):
+        with pytest.raises(ValidationError):
+            PriceUpdate(external_id="x")
+
+    def test_changed_fields_only_includes_provided(self):
+        assert PriceUpdate(external_id="x", price=99.0).changed_fields() == {"price": 99.0}
+        assert PriceUpdate(external_id="x", in_stock=False).changed_fields() == {"in_stock": False}
+
+    def test_all_fields(self):
+        u = PriceUpdate(external_id="x", price=10.5, currency="USD", in_stock=True)
+        assert u.changed_fields() == {"price": 10.5, "currency": "USD", "in_stock": True}
+
+    def test_negative_price_rejected(self):
+        with pytest.raises(ValidationError):
+            PriceUpdate(external_id="x", price=-1)
+
+    def test_stock_false_is_a_valid_change(self):
+        # in_stock=False must not be mistaken for "field absent"
+        assert PriceUpdate(external_id="x", in_stock=False).changed_fields() == {"in_stock": False}
 
 
 class TestSearchRequest:

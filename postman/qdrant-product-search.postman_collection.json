@@ -126,6 +126,44 @@
           "response": []
         },
         {
+          "name": "Update price / availability (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_id\": \"tool-001\",\n  \"price\": 3099.0,\n  \"in_stock\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/tool-001/price",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "tool-001", "price"]
+            },
+            "description": "Payload-only update of price / availability — no re-embedding (milliseconds). Body must carry external_id (matching the path) plus at least one of price / in_stock / currency. 404 if the product does not exist."
+          },
+          "response": []
+        },
+        {
+          "name": "Update prices (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"external_id\": \"tool-001\", \"price\": 3099.0, \"in_stock\": true },\n    { \"external_id\": \"tool-002\", \"price\": 4399.0 },\n    { \"external_id\": \"tool-003\", \"in_stock\": false }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:prices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:prices"]
+            },
+            "description": "Bulk price / availability update (up to 1000). Partial success: unknown external_ids come back as failed items instead of failing the whole request. No re-embedding."
+          },
+          "response": []
+        },
+        {
           "name": "Delete product",
           "request": {
             "method": "DELETE",

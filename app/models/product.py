@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AttrValue = str | int | float | bool
 
@@ -39,6 +41,40 @@ class ProductIn(BaseModel):
             return None
         digits = "".join(c for c in v if c.isdigit())
         return digits or None
+
+
+class PriceUpdate(BaseModel):
+    """A price / availability change for one product — a payload-only update that never
+    touches the vectors (price and stock are not embedded). At least one mutable field
+    must be present."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    external_id: str = Field(min_length=1, max_length=128)
+    price: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, max_length=8)
+    in_stock: bool | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> PriceUpdate:
+        if self.price is None and self.currency is None and self.in_stock is None:
+            raise ValueError("at least one of price, currency, in_stock must be provided")
+        return self
+
+    def changed_fields(self) -> dict[str, Any]:
+        """The subset of payload keys this update actually changes."""
+        changes: dict[str, Any] = {}
+        if self.price is not None:
+            changes["price"] = self.price
+        if self.currency is not None:
+            changes["currency"] = self.currency
+        if self.in_stock is not None:
+            changes["in_stock"] = self.in_stock
+        return changes
+
+
+class PriceUpdateBatch(BaseModel):
+    items: list[PriceUpdate] = Field(min_length=1, max_length=1000)
 
 
 class BatchUpsertRequest(BaseModel):

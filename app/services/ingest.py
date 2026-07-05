@@ -9,7 +9,7 @@ from typing import Any
 from qdrant_client import models
 
 from app.core.config import Settings
-from app.models.product import BatchItemResult, BatchUpsertResult, ProductIn
+from app.models.product import BatchItemResult, BatchUpsertResult, PriceUpdate, ProductIn
 from app.services.code_index import CodeIndex
 from app.services.embedding import EmbeddingService
 from app.services.enrichment import Enrichment, ProductEnrichmentService
@@ -112,6 +112,30 @@ class IngestService:
 
         results = [BatchItemResult(external_id=p.external_id, ok=True) for p in items]
         return BatchUpsertResult(total=len(results), succeeded=len(results), failed=0, items=results)
+
+    async def update_prices(self, updates: list[PriceUpdate]) -> BatchUpsertResult:
+        """Payload-only update of price / availability. No embedding and no CodeIndex
+        change — vectors and codes are unaffected by price/stock, so this skips the whole
+        heavy ingest pipeline. Partial success: unknown external_ids are reported failed,
+        not fatal (a price feed routinely references products not in this catalog)."""
+        # last write wins for duplicated external_ids inside one batch
+        unique: dict[str, PriceUpdate] = {u.external_id: u for u in updates}
+        point_ids = {point_id_for(eid): eid for eid in unique}
+        existing = await self.qdrant.retrieve_existing(list(point_ids))
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+
+        results: list[BatchItemResult] = []
+        for eid, update in unique.items():
+            if point_id_for(eid) not in existing:
+                results.append(BatchItemResult(external_id=eid, ok=False, error="Product not found"))
+                continue
+            await self.qdrant.set_payload(point_id_for(eid), {**update.changed_fields(), "updated_at": now})
+            results.append(BatchItemResult(external_id=eid, ok=True))
+
+        succeeded = sum(1 for r in results if r.ok)
+        return BatchUpsertResult(
+            total=len(results), succeeded=succeeded, failed=len(results) - succeeded, items=results
+        )
 
     async def delete_product(self, external_id: str) -> bool:
         point_id = point_id_for(external_id)

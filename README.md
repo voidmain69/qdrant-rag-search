@@ -176,6 +176,8 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 | `POST /api/v1/products` | Upsert one product | `200` → batch result |
 | `POST /api/v1/products:batch` | Upsert up to 1000 products | `200` → batch result |
 | `PUT /api/v1/products/{external_id}` | Full replace (body `external_id` must match path) | `200` |
+| `PATCH /api/v1/products/{external_id}/price` | Update only price / availability — no re-embedding | `200`; `404` if absent |
+| `POST /api/v1/products:prices` | Bulk price / availability update (≤1000, partial success) | `200` → batch result |
 | `DELETE /api/v1/products/{external_id}` | Delete | `204`; `404` if absent |
 | `POST /api/v1/imports` | Start file import (multipart `file`, optional form field `column_mapping`) | `202` → job |
 | `GET /api/v1/imports/{job_id}` | Import progress | `200` → job |
@@ -185,6 +187,8 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 | `GET /metrics` | Prometheus metrics (if `METRICS_ENABLED=true`) | `200` |
 
 Common errors: `401` invalid/missing API key, `422` validation error (Pydantic detail body), `400` rerank requested but disabled, `413` import file > 100 MB.
+
+**Price / availability updates.** A full upsert re-runs the whole heavy pipeline (LLM enrichment + dense/sparse embedding), which is wasted work when only `price`, `in_stock` or `currency` change — those fields are not embedded. Use `PATCH /products/{id}/price` (single) or `POST /products:prices` (bulk) instead: they patch the Qdrant payload directly (`set_payload`, vectors untouched, CodeIndex untouched), completing in milliseconds. Body is a `PriceUpdate` — `external_id` plus at least one of `price` / `in_stock` / `currency`; only the provided fields change, and `updated_at` is bumped. The bulk endpoint is partial-success: unknown `external_id`s come back as failed items (`"Product not found"`) rather than failing the batch.
 
 ### Product schema (`ProductIn`)
 

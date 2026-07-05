@@ -138,6 +138,23 @@ class QdrantService:
     async def upsert_points(self, points: list[models.PointStruct]) -> None:
         await _with_retry(lambda: self.client.upsert(self.collection, points=points, wait=True), "upsert")
 
+    async def retrieve_existing(self, point_ids: list[str]) -> set[str]:
+        """Subset of point_ids that currently exist (payload-free existence check)."""
+        if not point_ids:
+            return set()
+        points = await _with_retry(
+            lambda: self.client.retrieve(self.collection, ids=point_ids, with_payload=False),
+            "retrieve",
+        )
+        return {str(p.id) for p in points}
+
+    async def set_payload(self, point_id: str, payload: dict[str, Any]) -> None:
+        """Merge `payload` into an existing point's payload; vectors are untouched."""
+        await _with_retry(
+            lambda: self.client.set_payload(self.collection, payload=payload, points=[point_id], wait=True),
+            "set_payload",
+        )
+
     async def delete_point(self, point_id: str) -> bool:
         existing = await _with_retry(
             lambda: self.client.retrieve(self.collection, ids=[point_id], with_payload=False),
