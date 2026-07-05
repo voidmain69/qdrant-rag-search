@@ -213,6 +213,7 @@ Common errors: `401` invalid/missing API key, `422` validation error (Pydantic d
   "limit": 10,                        // 1–100, default 10
   "offset": 0,
   "rerank": false,                    // cross-encoder rerank of the hybrid branch
+  "mode": "relaxed",                  // "relaxed" (default) | "strict" — see Search modes
   "filters": {                        // all optional, AND-combined
     "brand": "Bosch",                 // case-insensitive
     "category": "Електроінструмент",  // exact match
@@ -241,12 +242,26 @@ Filters are applied inside the vector query (indexed payload fields) for the hyb
         "branch": "hybrid",           // exact | exact_normalized | ean_corrected | fuzzy | hybrid
         "matched_field": null,        // article | product_code | ean13 (code branches)
         "code_score": null,           // 0.80–1.00 for code branches
-        "reranked": false
+        "reranked": false,
+        "query_coverage": 1.0,        // share of significant query terms found in the product
+        "missing_terms": null         // query terms the product lacks (why it's an alternative)
       }
     }
-  ]
+  ],
+  "alternatives": []                  // strict mode: ranked near-misses; [] in relaxed mode
 }
 ```
+
+### Search modes
+
+Vector search always returns the *nearest* products — even when nothing in the catalog satisfies every requested characteristic. `mode` controls what happens then:
+
+- **`relaxed`** (default) — one ranked list, nearest-first. Hybrid hits still carry `match.query_coverage` and `match.missing_terms`, so clients can see how well each hit matches.
+- **`strict`** — `items` contains only products the service is *sure* about: every significant query term (stopwords dropped) is present in the product's own fields, or the product was hit by a strong code tier. Everything else that still covers ≥ 50 % of the request lands in `alternatives`, each with `missing_terms` naming exactly what it lacks.
+
+Example: `{"query": "мат плата з hdmi на 1200", "mode": "strict"}` against a catalog where no board has both HDMI and LGA 1200 → `items` is empty (nothing to over-promise), and the LGA 1200 board without HDMI comes back in `alternatives` with `"missing_terms": ["hdmi"]`.
+
+Term matching is heuristic and unit-tested: numbers match on digit boundaries (`1200` ≠ `12000`, but matches `LGA1200`), alphabetic tokens match by prefix (`мат` covers «Материнська»), tokens ≥ 5 chars tolerate a changed final char (`плати` covers «плата»).
 
 ---
 

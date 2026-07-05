@@ -22,6 +22,11 @@ class MatchBranch(StrEnum):
     HYBRID = "hybrid"
 
 
+class SearchMode(StrEnum):
+    RELAXED = "relaxed"  # current behavior: one ranked list, nearest-first
+    STRICT = "strict"  # items = every query term covered; the rest go to `alternatives`
+
+
 class SearchFilters(BaseModel):
     brand: str | None = None
     category: str | None = None
@@ -39,6 +44,7 @@ class SearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
     rerank: bool = False
+    mode: SearchMode = SearchMode.RELAXED
     filters: SearchFilters | None = None
 
 
@@ -47,6 +53,10 @@ class MatchExplanation(BaseModel):
     matched_field: str | None = None
     code_score: float | None = None
     reranked: bool = False
+    # share of significant query terms found in the product (hybrid branch only)
+    query_coverage: float | None = None
+    # the query terms this product does NOT contain — why it is only an alternative
+    missing_terms: list[str] | None = None
 
 
 class SearchHit(BaseModel):
@@ -60,3 +70,6 @@ class SearchResponse(BaseModel):
     took_ms: float
     total: int
     items: list[SearchHit]
+    # strict mode: near-miss products (ranked, capped at `limit`) with match.missing_terms
+    # explaining what each one lacks; always [] in relaxed mode
+    alternatives: list[SearchHit] = Field(default_factory=list)

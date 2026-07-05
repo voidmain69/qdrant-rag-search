@@ -1,0 +1,119 @@
+"""Strict search mode end-to-end at the service level (Qdrant and embedder stubbed).
+
+Scenario: "мат плата з hdmi на 1200" — the catalog has LGA 1200 boards, but only one
+of them has HDMI. Strict mode must return the HDMI board as a confident item and the
+HDMI-less board as an alternative that names the missing term.
+"""
+
+import pytest
+from qdrant_client import models
+
+from app.core.config import Settings
+from app.models.search import SearchMode, SearchRequest
+from app.services.code_index import CodeIndex
+from app.services.query_router import SearchService
+
+MB_WITH_HDMI = {
+    "external_id": "mb-1",
+    "name": "Материнська плата MSI B460M-A PRO",
+    "attributes": {"Сокет": "LGA 1200", "Відеовиходи": "HDMI, DVI-D"},
+}
+
+MB_NO_HDMI = {
+    "external_id": "mb-2",
+    "name": "Материнська плата ASUS PRIME H410M-R",
+    "attributes": {"Сокет": "LGA 1200", "Відеовиходи": "D-Sub, DVI-D"},
+}
+
+# a vector neighbour that shares almost nothing with the query — noise, not an alternative
+KETTLE = {
+    "external_id": "kettle-1",
+    "name": "Чайник електричний Tefal KI270D30",
+    "attributes": {"Потужність": "1200 Вт"},
+}
+
+
+class StubQdrant:
+    """Returns a fixed nearest-neighbour list, as a real hybrid query would."""
+
+    def __init__(self, payloads: list[dict]):
+        self._points = [
+            models.ScoredPoint(id=str(i), version=0, score=1.0 - i * 0.1, payload=p)
+            for i, p in enumerate(payloads)
+        ]
+
+    async def hybrid_query(self, *args, **kwargs):
+        return self._points
+
+    async def retrieve_payloads(self, point_ids):
+        return {}
+
+
+class StubEmbedder:
+    async def aembed_query(self, dense_text, sparse_text):
+        return [0.0], models.SparseVector(indices=[], values=[])
+
+
+def make_service(payloads: list[dict]) -> SearchService:
+    return SearchService(
+        settings=Settings(_env_file=None),
+        qdrant=StubQdrant(payloads),  # type: ignore[arg-type]
+        embedder=StubEmbedder(),  # type: ignore[arg-type]
+        code_index=CodeIndex(),
+        reranker=None,
+    )
+
+
+QUERY = "мат плата з hdmi на 1200"
+
+
+async def test_strict_mode_splits_confident_and_alternatives():
+    service = make_service([MB_NO_HDMI, MB_WITH_HDMI])  # nearest-first: the wrong one ranks higher
+    resp = await service.search(SearchRequest(query=QUERY, mode=SearchMode.STRICT))
+
+    assert [h.product["external_id"] for h in resp.items] == ["mb-1"]
+    assert resp.items[0].match.query_coverage == 1.0
+    assert resp.total == 1
+
+    assert [h.product["external_id"] for h in resp.alternatives] == ["mb-2"]
+    assert resp.alternatives[0].match.missing_terms == ["hdmi"]
+
+
+async def test_low_coverage_neighbours_are_not_alternatives():
+    # the kettle matches "1200" only (coverage 0.25) — below the alternative threshold
+    service = make_service([MB_NO_HDMI, KETTLE])
+    resp = await service.search(SearchRequest(query=QUERY, mode=SearchMode.STRICT))
+    assert resp.items == []
+    assert [h.product["external_id"] for h in resp.alternatives] == ["mb-2"]
+
+
+async def test_strict_mode_all_alternatives_when_nothing_covers():
+    service = make_service([MB_NO_HDMI])
+    resp = await service.search(SearchRequest(query=QUERY, mode=SearchMode.STRICT))
+    assert resp.items == []
+    assert resp.total == 0
+    assert len(resp.alternatives) == 1
+    assert resp.alternatives[0].match.missing_terms == ["hdmi"]
+
+
+async def test_relaxed_mode_keeps_single_list_but_annotates():
+    service = make_service([MB_NO_HDMI, MB_WITH_HDMI])
+    resp = await service.search(SearchRequest(query=QUERY, mode=SearchMode.RELAXED))
+    assert resp.alternatives == []
+    assert len(resp.items) == 2  # nearest-first order untouched
+    by_id = {h.product["external_id"]: h for h in resp.items}
+    assert by_id["mb-1"].match.query_coverage == 1.0
+    assert by_id["mb-2"].match.missing_terms == ["hdmi"]
+
+
+async def test_strict_mode_pagination_counts_confident_only():
+    service = make_service([MB_WITH_HDMI, MB_NO_HDMI])
+    resp = await service.search(SearchRequest(query=QUERY, mode=SearchMode.STRICT, limit=1, offset=1))
+    assert resp.total == 1  # one confident hit in total
+    assert resp.items == []  # offset=1 is past it
+    assert len(resp.alternatives) == 1
+
+
+@pytest.mark.parametrize("mode", [SearchMode.RELAXED, SearchMode.STRICT])
+async def test_mode_accepted_in_request_model(mode):
+    assert SearchRequest(query="x", mode=mode).mode is mode

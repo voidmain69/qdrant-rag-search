@@ -23,16 +23,22 @@ from app.models.search import (
     MatchExplanation,
     QueryKind,
     SearchHit,
+    SearchMode,
     SearchRequest,
     SearchResponse,
 )
 from app.services.code_index import STRONG_CODE_SCORE, CodeHit, CodeIndex
+from app.services.coverage import coverage, significant_tokens
 from app.services.embedding import EmbeddingService
 from app.services.normalization import compose_sparse_query, is_code_like, tokenize_query
 from app.services.qdrant import QdrantService, build_filter, payload_matches_filters
 from app.services.reranker import RerankerService
 
 logger = logging.getLogger(__name__)
+
+# strict mode: a near-miss must still cover at least this share of the query terms
+# to qualify as an alternative — vector neighbours below it are just noise
+MIN_ALTERNATIVE_COVERAGE = 0.5
 
 SEARCH_REQUESTS_TOTAL = Counter(
     "search_requests_total", "Search requests by query classification", ["query_kind"]
@@ -98,6 +104,15 @@ class SearchService:
             code_items = await self._code_hits_to_items(code_hits, req)
             items = _merge(code_items, hybrid_items)
 
+        _annotate_coverage(req.query, items)
+
+        alternatives: list[SearchHit] = []
+        if req.mode == SearchMode.STRICT:
+            # confident hits keep the ranked order; near-misses become alternatives
+            confident = [i for i in items if _is_confident(i)]
+            alternatives = [i for i in items if not _is_confident(i) and _is_alternative(i)][: req.limit]
+            items = confident
+
         total = len(items)
         items = items[req.offset : req.offset + req.limit]
         took_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -105,9 +120,18 @@ class SearchService:
         SEARCH_LATENCY_SECONDS.labels(query_kind=cls.kind.value).observe(took_ms / 1000)
         logger.info(
             "search completed",
-            extra={"query_kind": cls.kind.value, "took_ms": took_ms, "total": total, "rerank": req.rerank},
+            extra={
+                "query_kind": cls.kind.value,
+                "mode": req.mode.value,
+                "took_ms": took_ms,
+                "total": total,
+                "alternatives": len(alternatives),
+                "rerank": req.rerank,
+            },
         )
-        return SearchResponse(query_kind=cls.kind, took_ms=took_ms, total=total, items=items)
+        return SearchResponse(
+            query_kind=cls.kind, took_ms=took_ms, total=total, items=items, alternatives=alternatives
+        )
 
     # --- code branch ---
 
@@ -175,6 +199,34 @@ class SearchService:
             hit.match.reranked = True
         top.sort(key=lambda h: h.score, reverse=True)
         return top + items[self.settings.rerank_top_k :]
+
+
+def _annotate_coverage(query: str, items: list[SearchHit]) -> None:
+    """Stamp query_coverage / missing_terms on hybrid-branch hits (both modes:
+    even in relaxed mode clients see how well each hit matches the request)."""
+    tokens = significant_tokens(query)
+    for item in items:
+        if item.match.branch is MatchBranch.HYBRID:
+            ratio, missing = coverage(tokens, item.product)
+            item.match.query_coverage = round(ratio, 3)
+            item.match.missing_terms = missing or None
+
+
+def _is_confident(item: SearchHit) -> bool:
+    """Strict-mode gate: hybrid hits must cover every significant query term;
+    code hits must come from a strong tier (exact / skeleton / EAN-corrected) —
+    a fuzzy code hit is by definition a different code, i.e. an alternative."""
+    if item.match.branch is MatchBranch.HYBRID:
+        return item.match.query_coverage == 1.0
+    return (item.match.code_score or 0.0) >= STRONG_CODE_SCORE
+
+
+def _is_alternative(item: SearchHit) -> bool:
+    """A useful near-miss covers a meaningful share of the request; fuzzy code hits
+    (a close but different code) always qualify."""
+    if item.match.branch is MatchBranch.HYBRID:
+        return (item.match.query_coverage or 0.0) >= MIN_ALTERNATIVE_COVERAGE
+    return True
 
 
 def _rerank_text(payload: dict) -> str:

@@ -110,6 +110,53 @@ class TestSearchBranches:
             assert hit["product"]["brand"] == "Samsung"
 
 
+class TestStrictMode:
+    """No motherboard in the catalog has both HDMI and socket 1200 except mb-1:
+    strict mode must separate the confident hit from the near-miss alternative."""
+
+    MOTHERBOARDS = (
+        {
+            "external_id": "e2e-mb-1",
+            "name": "Материнська плата MSI B460M-A PRO",
+            "brand": "MSI",
+            "category": "Материнські плати",
+            "attributes": {"Сокет": "LGA 1200", "Відеовиходи": "HDMI, DVI-D"},
+        },
+        {
+            "external_id": "e2e-mb-2",
+            "name": "Материнська плата ASUS PRIME H410M-R",
+            "brand": "ASUS",
+            "category": "Материнські плати",
+            "attributes": {"Сокет": "LGA 1200", "Відеовиходи": "D-Sub, DVI-D"},
+        },
+    )
+
+    @pytest.fixture(scope="class")
+    def boards(self, client, ingested):
+        resp = client.post("/api/v1/products:batch", json={"items": self.MOTHERBOARDS})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["failed"] == 0
+
+    def test_strict_splits_confident_from_alternatives(self, client, boards):
+        data = search(client, "мат плата з hdmi на 1200", mode="strict")
+        item_ids = [h["product"]["external_id"] for h in data["items"]]
+        alt_ids = [h["product"]["external_id"] for h in data["alternatives"]]
+
+        assert "e2e-mb-1" in item_ids
+        assert all(h["match"]["query_coverage"] == 1.0 for h in data["items"])
+
+        assert "e2e-mb-2" in alt_ids
+        near_miss = next(h for h in data["alternatives"] if h["product"]["external_id"] == "e2e-mb-2")
+        assert near_miss["match"]["missing_terms"] == ["hdmi"]
+
+    def test_relaxed_annotates_but_does_not_split(self, client, boards):
+        data = search(client, "мат плата з hdmi на 1200")
+        assert data["alternatives"] == []
+        hits = {h["product"]["external_id"]: h for h in data["items"]}
+        assert hits["e2e-mb-1"]["match"]["query_coverage"] == 1.0
+        assert hits["e2e-mb-2"]["match"]["missing_terms"] == ["hdmi"]
+
+
 class TestLifecycle:
     def test_update_reflects_in_search(self, client, ingested):
         product = {
