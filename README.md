@@ -502,8 +502,8 @@ Best quality on long/ambiguous phrases, +50–200 ms when enabled. Requesting `r
 
 ```bash
 uv sync --group dev
-uv run pytest -q                            # 62 unit tests — no Qdrant/models needed
-uv run pytest -m integration -q -o addopts="" # 13 e2e tests against a running compose stack
+uv run pytest -q                            # 149 unit tests — no Qdrant/models needed
+uv run pytest -m integration -q -o addopts="" # e2e tests against a running compose stack
 uv run ruff check app tests scripts         # lint
 uv run ruff format app tests scripts        # format
 uv run mypy                                 # type check (app/)
@@ -512,6 +512,19 @@ uv run python scripts/gen_sample_data.py    # regenerate data/sample_products.js
 ```
 
 CI (GitHub Actions, `.github/workflows/ci.yml`) runs lint, format check, mypy, unit tests, and a Docker image build on every push/PR. See `docs/production_readiness.md` for the production checklist.
+
+### Search-quality evaluation
+
+Relevance is measured, not eyeballed: `eval/queries.jsonl` is a labelled query set (graded 0-3, uk/ru/en × code/text/mixed/strict) and `scripts/eval_search.py` scores the live service with **nDCG@k / Recall@k / MRR, reported per segment** (so you see *where* quality leaks, not just an average). Run it before/after any change that touches retrieval, fusion, enrichment, or ranking.
+
+```bash
+# reproducible corpus (ingest sample + reconcile), score, save the baseline:
+uv run --no-sync python scripts/eval_search.py --setup --out eval/baseline.json --label prod
+# after a change, diff against the baseline (per-segment deltas + per-query regressions):
+uv run --no-sync python scripts/eval_search.py --compare eval/baseline.json --label candidate
+```
+
+Details, metrics and caveats (small-sample noise, judged-pool bias): `eval/README.md`.
 
 Layout:
 
@@ -522,9 +535,10 @@ app/
 ├── models/            # Pydantic v2 schemas: product, search, imports
 ├── api/v1/            # routers: products, search, imports, health
 └── services/          # the engine (see Components table above)
-scripts/               # gen_sample_data, download_models, smoke_search
-tests/unit             # normalization, EAN, code index, query classification
+scripts/               # gen_sample_data, download_models, smoke_search, eval_search
+tests/unit             # normalization, EAN, code index, query classification, sync, enrichment
 tests/integration      # full e2e over HTTP (marker: integration)
+eval/                  # labelled query set + baseline for search-quality scoring
 ```
 
 Unit tests never import ONNX (the FastEmbed import is deferred into `EmbeddingService.__init__`), so they run anywhere in ~2 s.

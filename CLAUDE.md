@@ -11,6 +11,9 @@ uv run ruff check app tests scripts           # lint
 uv run ruff format app tests scripts          # format
 uv run mypy                                   # type check (app/)
 docker compose up -d --build                  # full stack (requires .env with API_KEYS)
+# search-quality eval (against the live stack): scorecard, and diff after a change
+uv run --no-sync python scripts/eval_search.py --setup --out eval/baseline.json --label prod
+uv run --no-sync python scripts/eval_search.py --compare eval/baseline.json --label candidate
 ```
 
 All five checks (lint, format --check, mypy, pytest, docker build) must pass — CI (`.github/workflows/ci.yml`) enforces them.
@@ -38,6 +41,7 @@ All five checks (lint, format --check, mypy, pytest, docker build) must pass —
 - **Strict mode & coverage**: `strict` search splits confident hits from `alternatives` via requirement coverage (`app/services/coverage.py`). Synonymization is dictionary-free: LLM query understanding (`app/services/query_understanding.py`, `QUERY_LLM_ENABLED`), strict-mode-only, LRU-cached, always degrades to token heuristics on failure. No hand-maintained synonym dictionaries — see `docs/search_semantics.md` (incl. why SPLADE was rejected: no multilingual checkpoint in fastembed).
 - **Ingest enrichment** (`app/services/enrichment.py`, `INGEST_LLM_ENABLED`): LLM enriches **every** product by default (supplier attributes still win on merge) — the win is the uk/ru/en synonyms; `INGEST_ENRICH_WITH_ATTRIBUTES=false` restores "attribute-less only". Failure → ingest unenriched. Synonyms go to sparse text only, spec/use-cases to dense. A 3-way benchmark (branch `experiment/bge-m3`) found e5+BM25+enrichment beats raw BGE-M3 thanks to these synonyms — see `docs/pipeline_assessment.md`.
 - **Catalog sync & lifecycle**: three orthogonal levers — `in_stock` (buyable, still searchable), `status=archived` (hidden from default search, retained, reversible), hard `delete` (vectors gone). Search hides `archived` by default via `must_not status=archived` (legacy points without `status` count as active); `include_archived=true` opts in; code branch honours it in `payload_matches_filters`. `upsert` skips embedding when `content_hash` (hash of embedding-affecting fields) is unchanged — `REEMBED_UNCHANGED=true` forces it. `POST /products:reconcile` **archives** orphans (never deletes) with `dry_run` (default) + `max_archived` cap. Sync ops live in `IngestService` (`set_archived`/`delete_products`/`reconcile`/`diff`/`stats`).
+- **Measure search-quality changes with the eval harness** (`eval/`, `scripts/eval_search.py`) — never judge relevance by eyeballing a few queries. `eval/queries.jsonl` is a labelled seed (graded 0-3, uk/ru/en × code/text/mixed/strict); the runner reports nDCG@k / Recall@k / MRR **per segment** (segments expose where quality leaks — e.g. `mode:strict` is the current weak spot). `--setup` makes the corpus reproducible via `:reconcile`; `--compare eval/baseline.json` diffs a change; `--judge` LLM-grades pooled hits to find missing labels. `eval/baseline.json` is the committed reference run.
 - Observability is wired in `app/core/{logging,monitoring}.py` + `app/main.py`: request-id on every log record, JSON logs outside development, Prometheus `/metrics`, Sentry via `SENTRY_DSN`.
 
 ## This Windows host (important)
