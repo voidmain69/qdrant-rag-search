@@ -1,0 +1,1005 @@
+{
+ "k": 10,
+ "overall": {
+  "recall": 0.9791666666666666,
+  "mrr": 0.96875,
+  "ndcg": 0.9721927690668246,
+  "n": 48
+ },
+ "segments": {
+  "lang:en": {
+   "recall": 1.0,
+   "mrr": 0.9285714285714286,
+   "ndcg": 0.9623376595906198,
+   "n": 7
+  },
+  "lang:ru": {
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 0.996017317116133,
+   "n": 7
+  },
+  "lang:uk": {
+   "recall": 0.9705882352941176,
+   "mrr": 0.9705882352941176,
+   "ndcg": 0.9693167081841267,
+   "n": 34
+  },
+  "kind:code": {
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "n": 6
+  },
+  "kind:mixed": {
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "n": 4
+  },
+  "kind:text": {
+   "recall": 0.9736842105263158,
+   "mrr": 0.9605263157894737,
+   "ndcg": 0.9648750767159889,
+   "n": 38
+  },
+  "mode:relaxed": {
+   "recall": 1.0,
+   "mrr": 0.9888888888888889,
+   "ndcg": 0.9925611758935018,
+   "n": 45
+  },
+  "mode:strict": {
+   "recall": 0.6666666666666666,
+   "mrr": 0.6666666666666666,
+   "ndcg": 0.6666666666666666,
+   "n": 3
+  }
+ },
+ "per_query": [
+  {
+   "query": "бездротовий пилосос для дому",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "home-001",
+    "home-002",
+    "home-003",
+    "tool-001",
+    "el-004",
+    "el-005",
+    "tool-006",
+    "home-004",
+    "auto-003",
+    "el-003"
+   ]
+  },
+  {
+   "query": "робот пилосос",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "home-002",
+    "home-001",
+    "home-003",
+    "tool-002",
+    "el-003",
+    "home-004",
+    "el-001",
+    "tool-006",
+    "tool-007",
+    "garden-003"
+   ]
+  },
+  {
+   "query": "моторна олива 5W-30",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-002",
+    "el-003",
+    "tool-005",
+    "fix-002",
+    "home-006",
+    "fix-003",
+    "tool-006",
+    "san-001",
+    "tool-007",
+    "tool-004"
+   ]
+  },
+  {
+   "query": "ноутбук для роботи",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-001",
+    "home-002",
+    "el-003",
+    "tool-002",
+    "el-004",
+    "home-001",
+    "tool-006",
+    "home-007",
+    "el-002",
+    "tool-004"
+   ]
+  },
+  {
+   "query": "ігровий монітор",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-002",
+    "auto-004",
+    "light-002",
+    "san-001",
+    "tool-007",
+    "el-004",
+    "el-006",
+    "home-007",
+    "home-001",
+    "garden-001"
+   ]
+  },
+  {
+   "query": "бездротові навушники з шумозаглушенням",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-003",
+    "home-007",
+    "home-001",
+    "home-005",
+    "tool-007",
+    "home-003",
+    "auto-003",
+    "garden-003",
+    "home-004",
+    "home-006"
+   ]
+  },
+  {
+   "query": "wi-fi роутер",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-004",
+    "auto-004",
+    "el-002",
+    "san-001",
+    "el-005",
+    "home-007",
+    "garden-003",
+    "el-003",
+    "home-002",
+    "auto-003"
+   ]
+  },
+  {
+   "query": "портативна зарядна станція",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-005",
+    "tool-003",
+    "garden-001",
+    "auto-001",
+    "tool-004",
+    "home-003",
+    "el-004",
+    "home-007",
+    "home-004",
+    "tool-001"
+   ]
+  },
+  {
+   "query": "смартфон samsung",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-006",
+    "home-003",
+    "el-002",
+    "el-003",
+    "auto-004",
+    "el-001",
+    "home-002",
+    "garden-002",
+    "home-001",
+    "tool-007"
+   ]
+  },
+  {
+   "query": "світлодіодна лампа E27",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "light-001",
+    "light-003",
+    "light-002",
+    "home-004",
+    "el-005",
+    "home-005",
+    "home-001",
+    "auto-001",
+    "tool-006",
+    "el-002"
+   ]
+  },
+  {
+   "query": "перфоратор",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 0.9567680782603095,
+   "ranked": [
+    "tool-002",
+    "garden-003",
+    "home-002",
+    "tool-007",
+    "home-004",
+    "garden-001",
+    "home-007",
+    "fix-002",
+    "tool-001",
+    "garden-002"
+   ]
+  },
+  {
+   "query": "акумуляторний шуруповерт",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-003",
+    "garden-001",
+    "auto-001",
+    "tool-004",
+    "el-005",
+    "tool-007",
+    "home-003",
+    "home-007",
+    "tool-001",
+    "home-001"
+   ]
+  },
+  {
+   "query": "кутова шліфмашина 125 мм",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-005",
+    "tool-007",
+    "fix-001",
+    "garden-003",
+    "san-002",
+    "fix-002",
+    "auto-003",
+    "tool-006",
+    "tool-001",
+    "san-001"
+   ]
+  },
+  {
+   "query": "фільтр для питної води",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "san-003",
+    "garden-002",
+    "el-005",
+    "home-005",
+    "fix-002",
+    "home-001",
+    "san-002",
+    "home-004",
+    "garden-003",
+    "san-001"
+   ]
+  },
+  {
+   "query": "автомобільний акумулятор",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-001",
+    "tool-004",
+    "auto-004",
+    "garden-001",
+    "tool-003",
+    "el-005",
+    "auto-002",
+    "auto-003",
+    "home-007",
+    "el-006"
+   ]
+  },
+  {
+   "query": "відеореєстратор",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-004",
+    "light-002",
+    "el-002",
+    "garden-003",
+    "tool-002",
+    "home-007",
+    "home-001",
+    "home-006",
+    "home-002",
+    "san-001"
+   ]
+  },
+  {
+   "query": "гірський велосипед",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "sport-001",
+    "fix-003",
+    "tool-007",
+    "auto-004",
+    "home-002",
+    "san-002",
+    "home-004",
+    "el-005",
+    "sport-002",
+    "tool-001"
+   ]
+  },
+  {
+   "query": "монтажна піна",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "fix-003",
+    "tool-005",
+    "home-007",
+    "tool-004",
+    "tool-001",
+    "san-002",
+    "home-001",
+    "tool-007",
+    "garden-001",
+    "el-003"
+   ]
+  },
+  {
+   "query": "секатор для саду",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "garden-003",
+    "garden-001",
+    "garden-002",
+    "fix-001",
+    "tool-001",
+    "auto-003",
+    "tool-006",
+    "home-001",
+    "tool-005",
+    "tool-002"
+   ]
+  },
+  {
+   "query": "шланг для поливу",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "garden-002",
+    "garden-003",
+    "garden-001",
+    "el-005",
+    "san-003",
+    "tool-007",
+    "tool-006",
+    "tool-005",
+    "home-004",
+    "home-001"
+   ]
+  },
+  {
+   "query": "змішувач для умивальника",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "san-001",
+    "home-007",
+    "home-006",
+    "fix-002",
+    "home-004",
+    "auto-003",
+    "tool-007",
+    "tool-005",
+    "home-003",
+    "home-002"
+   ]
+  },
+  {
+   "query": "беспроводной пылесос",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 0.9721212198129313,
+   "ranked": [
+    "home-001",
+    "home-003",
+    "home-002",
+    "home-004",
+    "auto-003",
+    "el-004",
+    "el-003",
+    "tool-007",
+    "tool-006",
+    "tool-001"
+   ]
+  },
+  {
+   "query": "наушники с шумоподавлением",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-003",
+    "home-004",
+    "el-002",
+    "fix-002",
+    "home-007",
+    "auto-003",
+    "san-001",
+    "tool-007",
+    "home-003",
+    "home-001"
+   ]
+  },
+  {
+   "query": "моторное масло",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-002",
+    "auto-001",
+    "fix-003",
+    "home-006",
+    "tool-005",
+    "tool-007",
+    "home-003",
+    "el-005",
+    "san-003",
+    "auto-004"
+   ]
+  },
+  {
+   "query": "аккумуляторный шуруповерт",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-003",
+    "tool-004",
+    "auto-001",
+    "garden-001",
+    "tool-007",
+    "home-003",
+    "tool-001",
+    "tool-002",
+    "home-002",
+    "el-005"
+   ]
+  },
+  {
+   "query": "робот пылесос",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "home-002",
+    "home-001",
+    "el-003",
+    "tool-002",
+    "home-003",
+    "home-004",
+    "el-001",
+    "tool-007",
+    "tool-006",
+    "tool-001"
+   ]
+  },
+  {
+   "query": "автомобильный аккумулятор",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-001",
+    "tool-004",
+    "garden-001",
+    "tool-003",
+    "auto-004",
+    "auto-003",
+    "el-005",
+    "auto-002",
+    "tool-001",
+    "tool-006"
+   ]
+  },
+  {
+   "query": "игровой монитор",
+   "lang": "ru",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-002",
+    "san-001",
+    "auto-004",
+    "el-001",
+    "home-001",
+    "home-007",
+    "garden-001",
+    "light-002",
+    "fix-003",
+    "tool-007"
+   ]
+  },
+  {
+   "query": "cordless vacuum cleaner",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 0.5,
+   "ndcg": 0.7363636171343382,
+   "ranked": [
+    "home-003",
+    "home-001",
+    "home-002",
+    "tool-003",
+    "garden-001",
+    "tool-007",
+    "auto-003",
+    "tool-005",
+    "el-003",
+    "home-004"
+   ]
+  },
+  {
+   "query": "noise cancelling headphones",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-003",
+    "auto-003",
+    "fix-002",
+    "garden-001",
+    "home-004",
+    "el-002",
+    "garden-002",
+    "home-001",
+    "el-004",
+    "sport-002"
+   ]
+  },
+  {
+   "query": "cordless screwdriver",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-003",
+    "tool-007",
+    "auto-003",
+    "home-001",
+    "tool-006",
+    "home-003",
+    "tool-005",
+    "tool-002",
+    "tool-001",
+    "el-003"
+   ]
+  },
+  {
+   "query": "motor oil 5w-30",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "auto-002",
+    "el-003",
+    "tool-005",
+    "home-006",
+    "san-001",
+    "tool-004",
+    "fix-003",
+    "home-001",
+    "auto-001",
+    "garden-002"
+   ]
+  },
+  {
+   "query": "gaming monitor",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-002",
+    "auto-004",
+    "home-004",
+    "san-001",
+    "garden-001",
+    "el-004",
+    "fix-003",
+    "home-001",
+    "sport-001",
+    "auto-003"
+   ]
+  },
+  {
+   "query": "robot vacuum",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "home-002",
+    "home-003",
+    "home-001",
+    "tool-007",
+    "san-001",
+    "tool-006",
+    "home-004",
+    "tool-005",
+    "home-007",
+    "tool-001"
+   ]
+  },
+  {
+   "query": "wifi router",
+   "lang": "en",
+   "kind": "text",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-004",
+    "auto-004",
+    "el-002",
+    "el-005",
+    "home-007",
+    "home-003",
+    "san-001",
+    "auto-003",
+    "tool-006",
+    "home-001"
+   ]
+  },
+  {
+   "query": "GSB-13-RE",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-001"
+   ]
+  },
+  {
+   "query": "DDF484Z",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-003"
+   ]
+  },
+  {
+   "query": "GSB13RE",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-001"
+   ]
+  },
+  {
+   "query": "ARCHER-AX55",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-004",
+    "el-006",
+    "fix-002",
+    "auto-003",
+    "tool-007",
+    "garden-002",
+    "home-004",
+    "light-002",
+    "san-001",
+    "tool-004"
+   ]
+  },
+  {
+   "query": "4006381333931",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-001"
+   ]
+  },
+  {
+   "query": "GSB-13-RF",
+   "lang": "uk",
+   "kind": "code",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-001",
+    "light-001",
+    "tool-007",
+    "tool-002",
+    "home-004",
+    "garden-002",
+    "home-001",
+    "el-004",
+    "san-001",
+    "fix-002"
+   ]
+  },
+  {
+   "query": "дриль GSB13RE з кейсом",
+   "lang": "uk",
+   "kind": "mixed",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-001",
+    "tool-003",
+    "tool-007",
+    "garden-003",
+    "tool-002",
+    "home-005",
+    "home-007",
+    "home-001",
+    "sport-002",
+    "tool-005"
+   ]
+  },
+  {
+   "query": "перфоратор Bosch GBH 2-26",
+   "lang": "uk",
+   "kind": "mixed",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-002",
+    "tool-007",
+    "auto-003",
+    "tool-001",
+    "garden-002",
+    "fix-001",
+    "garden-003",
+    "san-003",
+    "home-004",
+    "sport-001"
+   ]
+  },
+  {
+   "query": "навушники Sony WH-1000XM5",
+   "lang": "uk",
+   "kind": "mixed",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-003",
+    "el-002",
+    "home-007",
+    "tool-007",
+    "home-003",
+    "fix-002",
+    "auto-003",
+    "el-004",
+    "san-001",
+    "light-002"
+   ]
+  },
+  {
+   "query": "монітор Samsung Odyssey 27",
+   "lang": "uk",
+   "kind": "mixed",
+   "mode": "relaxed",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "el-002",
+    "home-003",
+    "el-006",
+    "light-002",
+    "home-001",
+    "auto-004",
+    "light-001",
+    "home-004",
+    "garden-003",
+    "el-003"
+   ]
+  },
+  {
+   "query": "монітор 27 дюймів 165 гц",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "strict",
+   "recall": 0.0,
+   "mrr": 0.0,
+   "ndcg": 0.0,
+   "ranked": []
+  },
+  {
+   "query": "лампа E27 4000K",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "strict",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "light-001"
+   ]
+  },
+  {
+   "query": "акумулятор makita 18V 5Ah",
+   "lang": "uk",
+   "kind": "text",
+   "mode": "strict",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "ndcg": 1.0,
+   "ranked": [
+    "tool-004"
+   ]
+  }
+ ],
+ "label": "prod"
+}

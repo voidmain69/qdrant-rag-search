@@ -1,0 +1,48 @@
+{"query": "бездротовий пилосос для дому", "lang": "uk", "kind": "text", "relevant": {"home-001": 3, "home-002": 2, "home-003": 1}}
+{"query": "робот пилосос", "lang": "uk", "kind": "text", "relevant": {"home-002": 3}}
+{"query": "моторна олива 5W-30", "lang": "uk", "kind": "text", "relevant": {"auto-002": 3}}
+{"query": "ноутбук для роботи", "lang": "uk", "kind": "text", "relevant": {"el-001": 3}}
+{"query": "ігровий монітор", "lang": "uk", "kind": "text", "relevant": {"el-002": 3}}
+{"query": "бездротові навушники з шумозаглушенням", "lang": "uk", "kind": "text", "relevant": {"el-003": 3}}
+{"query": "wi-fi роутер", "lang": "uk", "kind": "text", "relevant": {"el-004": 3}}
+{"query": "портативна зарядна станція", "lang": "uk", "kind": "text", "relevant": {"el-005": 3}}
+{"query": "смартфон samsung", "lang": "uk", "kind": "text", "relevant": {"el-006": 3}}
+{"query": "світлодіодна лампа E27", "lang": "uk", "kind": "text", "relevant": {"light-001": 3}}
+{"query": "перфоратор", "lang": "uk", "kind": "text", "relevant": {"tool-002": 3, "tool-001": 1}}
+{"query": "акумуляторний шуруповерт", "lang": "uk", "kind": "text", "relevant": {"tool-003": 3}}
+{"query": "кутова шліфмашина 125 мм", "lang": "uk", "kind": "text", "relevant": {"tool-005": 3, "tool-007": 1}}
+{"query": "фільтр для питної води", "lang": "uk", "kind": "text", "relevant": {"san-003": 3}}
+{"query": "автомобільний акумулятор", "lang": "uk", "kind": "text", "relevant": {"auto-001": 3}}
+{"query": "відеореєстратор", "lang": "uk", "kind": "text", "relevant": {"auto-004": 3}}
+{"query": "гірський велосипед", "lang": "uk", "kind": "text", "relevant": {"sport-001": 3}}
+{"query": "монтажна піна", "lang": "uk", "kind": "text", "relevant": {"fix-003": 3}}
+{"query": "секатор для саду", "lang": "uk", "kind": "text", "relevant": {"garden-003": 3}}
+{"query": "шланг для поливу", "lang": "uk", "kind": "text", "relevant": {"garden-002": 3}}
+{"query": "змішувач для умивальника", "lang": "uk", "kind": "text", "relevant": {"san-001": 3}}
+{"query": "беспроводной пылесос", "lang": "ru", "kind": "text", "relevant": {"home-001": 3, "home-002": 2, "home-003": 1}}
+{"query": "наушники с шумоподавлением", "lang": "ru", "kind": "text", "relevant": {"el-003": 3}}
+{"query": "моторное масло", "lang": "ru", "kind": "text", "relevant": {"auto-002": 3}}
+{"query": "аккумуляторный шуруповерт", "lang": "ru", "kind": "text", "relevant": {"tool-003": 3}}
+{"query": "робот пылесос", "lang": "ru", "kind": "text", "relevant": {"home-002": 3}}
+{"query": "автомобильный аккумулятор", "lang": "ru", "kind": "text", "relevant": {"auto-001": 3}}
+{"query": "игровой монитор", "lang": "ru", "kind": "text", "relevant": {"el-002": 3}}
+{"query": "cordless vacuum cleaner", "lang": "en", "kind": "text", "relevant": {"home-001": 3, "home-002": 2, "home-003": 1}}
+{"query": "noise cancelling headphones", "lang": "en", "kind": "text", "relevant": {"el-003": 3}}
+{"query": "cordless screwdriver", "lang": "en", "kind": "text", "relevant": {"tool-003": 3}}
+{"query": "motor oil 5w-30", "lang": "en", "kind": "text", "relevant": {"auto-002": 3}}
+{"query": "gaming monitor", "lang": "en", "kind": "text", "relevant": {"el-002": 3}}
+{"query": "robot vacuum", "lang": "en", "kind": "text", "relevant": {"home-002": 3}}
+{"query": "wifi router", "lang": "en", "kind": "text", "relevant": {"el-004": 3}}
+{"query": "GSB-13-RE", "lang": "uk", "kind": "code", "relevant": {"tool-001": 3}}
+{"query": "DDF484Z", "lang": "uk", "kind": "code", "relevant": {"tool-003": 3}}
+{"query": "GSB13RE", "lang": "uk", "kind": "code", "relevant": {"tool-001": 3}}
+{"query": "ARCHER-AX55", "lang": "uk", "kind": "code", "relevant": {"el-004": 3}}
+{"query": "4006381333931", "lang": "uk", "kind": "code", "relevant": {"tool-001": 3}}
+{"query": "GSB-13-RF", "lang": "uk", "kind": "code", "relevant": {"tool-001": 2}}
+{"query": "дриль GSB13RE з кейсом", "lang": "uk", "kind": "mixed", "relevant": {"tool-001": 3}}
+{"query": "перфоратор Bosch GBH 2-26", "lang": "uk", "kind": "mixed", "relevant": {"tool-002": 3}}
+{"query": "навушники Sony WH-1000XM5", "lang": "uk", "kind": "mixed", "relevant": {"el-003": 3}}
+{"query": "монітор Samsung Odyssey 27", "lang": "uk", "kind": "mixed", "relevant": {"el-002": 3}}
+{"query": "монітор 27 дюймів 165 гц", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"el-002": 3}}
+{"query": "лампа E27 4000K", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"light-001": 3}}
+{"query": "акумулятор makita 18V 5Ah", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-004": 3}}

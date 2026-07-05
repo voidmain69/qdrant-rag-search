@@ -1,0 +1,4 @@
+# generated run artifacts — baseline.json is committed as the reference
+scorecard-*.txt
+diff-*.txt
+judge-report.txt
