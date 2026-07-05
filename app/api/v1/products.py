@@ -31,8 +31,6 @@ async def replace_product(
 
 
 @router.delete("/products/{external_id}", status_code=204)
-async def delete_product(
-    external_id: str, ingest: IngestService = Depends(get_ingest_service)
-) -> None:
+async def delete_product(external_id: str, ingest: IngestService = Depends(get_ingest_service)) -> None:
     if not await ingest.delete_product(external_id):
         raise HTTPException(status_code=404, detail=f"Product '{external_id}' not found")

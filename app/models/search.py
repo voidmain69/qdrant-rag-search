@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.product import AttrValue
 
@@ -32,6 +32,9 @@ class SearchFilters(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    # a whitespace-only query must fail the min_length check, not reach the embedder
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     query: str = Field(min_length=1, max_length=512)
     limit: int = Field(default=10, ge=1, le=100)
     offset: int = Field(default=0, ge=0)

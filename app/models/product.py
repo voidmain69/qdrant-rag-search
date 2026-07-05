@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AttrValue = str | int | float | bool
 
 
 class ProductIn(BaseModel):
     """Product as accepted by the ingestion API."""
+
+    # leading/trailing whitespace must never make two external_ids map to different points
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     external_id: str = Field(min_length=1, max_length=128, description="Stable id in the source system")
     name: str = Field(min_length=1, max_length=512)

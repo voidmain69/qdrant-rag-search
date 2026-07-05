@@ -10,10 +10,14 @@ async def health() -> dict:
 
 @router.get("/ready")
 async def ready(request: Request, response: Response) -> dict:
-    if not getattr(request.app.state, "ready", False):
+    state = request.app.state
+    if not getattr(state, "ready", False):
         response.status_code = 503
         return {"status": "starting"}
+    if not await state.qdrant.ping():
+        response.status_code = 503
+        return {"status": "degraded", "detail": "Qdrant is unreachable"}
     return {
         "status": "ready",
-        "indexed_code_points": len(request.app.state.code_index),
+        "indexed_code_points": len(state.code_index),
     }

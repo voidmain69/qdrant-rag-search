@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ROW_ERRORS = 100
 INGEST_CHUNK = 200
+MAX_STORED_JOBS = 500
 
 # Common source-column names mapped onto ProductIn fields.
 DEFAULT_ALIASES = {
@@ -49,16 +50,30 @@ PRODUCT_FIELDS = set(ProductIn.model_fields.keys())
 
 
 class JobStore:
-    def __init__(self) -> None:
+    """In-memory job registry, bounded to MAX_STORED_JOBS so long-lived instances
+    don't leak memory (finished jobs are evicted first, oldest first)."""
+
+    def __init__(self, max_jobs: int = MAX_STORED_JOBS) -> None:
         self._jobs: dict[str, ImportJob] = {}
+        self._max_jobs = max_jobs
 
     def create(self, filename: str) -> ImportJob:
         job = ImportJob(job_id=uuid.uuid4().hex, filename=filename)
         self._jobs[job.job_id] = job
+        self._evict()
         return job
 
     def get(self, job_id: str) -> ImportJob | None:
         return self._jobs.get(job_id)
+
+    def _evict(self) -> None:
+        while len(self._jobs) > self._max_jobs:
+            # dicts preserve insertion order → the first finished job is the oldest one
+            finished = next(
+                (jid for jid, j in self._jobs.items() if j.status in (JobStatus.COMPLETED, JobStatus.FAILED)),
+                None,
+            )
+            del self._jobs[finished if finished is not None else next(iter(self._jobs))]
 
 
 def _map_row(row: dict[str, Any], mapping: dict[str, str] | None) -> dict[str, Any]:

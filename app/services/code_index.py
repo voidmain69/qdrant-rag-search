@@ -25,9 +25,23 @@ from app.models.search import MatchBranch
 from app.services.ean import ean13_variants
 from app.services.normalization import norm_code, skeleton
 
+# Score tiers of the matching cascade. Fuzzy scores are capped strictly below the
+# strong tiers so that ordering by score always reproduces the tier order.
+EXACT_SCORE = 1.0
+SKELETON_SCORE = 0.97
+EAN_SCORE = 0.95
+FUZZY_MAX_SCORE = 0.949
+
+# Hits at/above this score are unambiguous enough to short-circuit vector search.
+STRONG_CODE_SCORE = EAN_SCORE
+
 FUZZY_CUTOFF = 0.72
 FUZZY_THRESHOLD = 0.80
 FUZZY_CANDIDATES = 20
+FUZZY_OSA_WEIGHT = 0.6
+FUZZY_JW_WEIGHT = 0.4
+FUZZY_LENGTH_PENALTY_STEP = 0.02
+FUZZY_LENGTH_PENALTY_CAP = 0.10
 
 
 @dataclass(frozen=True)
@@ -108,25 +122,30 @@ class CodeIndex:
                 self._corpus = list(self._exact.keys())
             return self._corpus
 
+    def _lookup(self, table: dict[str, list[CodeRef]], key: str) -> list[CodeRef]:
+        """Snapshot of refs for a key; the lock guards against concurrent incremental updates."""
+        with self._lock:
+            return list(table.get(key, ()))
+
     def match(self, token: str) -> list[CodeHit]:
         normed = norm_code(token)
         if not normed:
             return []
 
-        refs = self._exact.get(normed)
+        refs = self._lookup(self._exact, normed)
         if refs:
-            return [CodeHit(r.point_id, r.field, 1.0, MatchBranch.EXACT) for r in refs]
+            return [CodeHit(r.point_id, r.field, EXACT_SCORE, MatchBranch.EXACT) for r in refs]
 
-        refs = self._skeleton.get(skeleton(normed))
+        refs = self._lookup(self._skeleton, skeleton(normed))
         if refs:
-            return [CodeHit(r.point_id, r.field, 0.97, MatchBranch.EXACT_NORMALIZED) for r in refs]
+            return [CodeHit(r.point_id, r.field, SKELETON_SCORE, MatchBranch.EXACT_NORMALIZED) for r in refs]
 
         if normed.isdigit() and 12 <= len(normed) <= 14:
             candidates, _ = ean13_variants(normed)
             ean_hits = [
-                CodeHit(r.point_id, r.field, 0.95, MatchBranch.EAN_CORRECTED)
+                CodeHit(r.point_id, r.field, EAN_SCORE, MatchBranch.EAN_CORRECTED)
                 for cand in candidates
-                for r in self._exact.get(cand, [])
+                for r in self._lookup(self._exact, cand)
             ]
             if ean_hits:
                 return ean_hits
@@ -147,11 +166,16 @@ class CodeIndex:
         hits: list[CodeHit] = []
         for candidate, osa_score, _idx in matches:
             jw = JaroWinkler.normalized_similarity(normed, candidate)
-            length_penalty = min(abs(len(normed) - len(candidate)) * 0.02, 0.10)
-            score = 0.6 * osa_score + 0.4 * jw - length_penalty
+            length_penalty = min(
+                abs(len(normed) - len(candidate)) * FUZZY_LENGTH_PENALTY_STEP,
+                FUZZY_LENGTH_PENALTY_CAP,
+            )
+            score = FUZZY_OSA_WEIGHT * osa_score + FUZZY_JW_WEIGHT * jw - length_penalty
             if score < FUZZY_THRESHOLD:
                 continue
-            for ref in self._exact.get(candidate, []):
-                hits.append(CodeHit(ref.point_id, ref.field, round(min(score, 0.949), 4), MatchBranch.FUZZY))
+            for ref in self._lookup(self._exact, candidate):
+                hits.append(
+                    CodeHit(ref.point_id, ref.field, round(min(score, FUZZY_MAX_SCORE), 4), MatchBranch.FUZZY)
+                )
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits

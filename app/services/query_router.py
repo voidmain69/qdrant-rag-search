@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 
 from fastapi import HTTPException
+from prometheus_client import Counter, Histogram
 
 from app.core.config import Settings
 from app.models.search import (
@@ -25,7 +26,7 @@ from app.models.search import (
     SearchRequest,
     SearchResponse,
 )
-from app.services.code_index import CodeHit, CodeIndex
+from app.services.code_index import STRONG_CODE_SCORE, CodeHit, CodeIndex
 from app.services.embedding import EmbeddingService
 from app.services.normalization import compose_sparse_query, is_code_like, tokenize_query
 from app.services.qdrant import QdrantService, build_filter, payload_matches_filters
@@ -33,7 +34,12 @@ from app.services.reranker import RerankerService
 
 logger = logging.getLogger(__name__)
 
-STRONG_CODE_SCORE = 0.95
+SEARCH_REQUESTS_TOTAL = Counter(
+    "search_requests_total", "Search requests by query classification", ["query_kind"]
+)
+SEARCH_LATENCY_SECONDS = Histogram(
+    "search_latency_seconds", "End-to-end search latency by query classification", ["query_kind"]
+)
 
 
 @dataclass(frozen=True)
@@ -44,10 +50,10 @@ class QueryClassification:
 
 
 def classify(query: str) -> QueryClassification:
-    tokens = tokenize_query(query)
-    code_idx = {i for i, t in enumerate(tokens) if is_code_like(t)}
-    code_tokens = [t for i, t in enumerate(tokens) if i in code_idx]
-    text_tokens = [t for i, t in enumerate(tokens) if i not in code_idx]
+    code_tokens: list[str] = []
+    text_tokens: list[str] = []
+    for token in tokenize_query(query):
+        (code_tokens if is_code_like(token) else text_tokens).append(token)
     if not code_tokens:
         return QueryClassification(QueryKind.TEXT, [], query)
     if not text_tokens:
@@ -71,6 +77,13 @@ class SearchService:
         self.reranker = reranker
 
     async def search(self, req: SearchRequest) -> SearchResponse:
+        if req.rerank and self.reranker is None:
+            # validated up-front so every query kind gets the same contract
+            raise HTTPException(
+                status_code=400,
+                detail="Reranking is disabled on this instance (set RERANK_ENABLED=true "
+                "and install the 'rerank' dependency group).",
+            )
         started = time.perf_counter()
         cls = classify(req.query)
 
@@ -87,15 +100,23 @@ class SearchService:
 
         total = len(items)
         items = items[req.offset : req.offset + req.limit]
-        took_ms = (time.perf_counter() - started) * 1000
-        return SearchResponse(query_kind=cls.kind, took_ms=round(took_ms, 1), total=total, items=items)
+        took_ms = round((time.perf_counter() - started) * 1000, 1)
+        SEARCH_REQUESTS_TOTAL.labels(query_kind=cls.kind.value).inc()
+        SEARCH_LATENCY_SECONDS.labels(query_kind=cls.kind.value).observe(took_ms / 1000)
+        logger.info(
+            "search completed",
+            extra={"query_kind": cls.kind.value, "took_ms": took_ms, "total": total, "rerank": req.rerank},
+        )
+        return SearchResponse(query_kind=cls.kind, took_ms=took_ms, total=total, items=items)
 
     # --- code branch ---
 
     async def _match_codes(self, tokens: list[str]) -> list[CodeHit]:
-        hits: list[CodeHit] = []
-        for token in tokens:
-            hits.extend(await asyncio.to_thread(self.code_index.match, token))
+        # one thread hop for all tokens; CodeIndex.match is synchronous CPU-bound code
+        def _match_all() -> list[CodeHit]:
+            return [hit for token in tokens for hit in self.code_index.match(token)]
+
+        hits = await asyncio.to_thread(_match_all)
         # dedup by point, keep the best score
         best: dict[str, CodeHit] = {}
         for hit in hits:
@@ -117,9 +138,7 @@ class SearchService:
                 SearchHit(
                     product=payload,
                     score=hit.score,
-                    match=MatchExplanation(
-                        branch=hit.branch, matched_field=hit.field, code_score=hit.score
-                    ),
+                    match=MatchExplanation(branch=hit.branch, matched_field=hit.field, code_score=hit.score),
                 )
             )
         return items
@@ -145,12 +164,7 @@ class SearchService:
         return items
 
     async def _rerank(self, query: str, items: list[SearchHit]) -> list[SearchHit]:
-        if self.reranker is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Reranking is disabled on this instance (set RERANK_ENABLED=true "
-                "and install the 'rerank' dependency group).",
-            )
+        assert self.reranker is not None  # guaranteed by the up-front check in search()
         if not items:
             return items
         top = items[: self.settings.rerank_top_k]

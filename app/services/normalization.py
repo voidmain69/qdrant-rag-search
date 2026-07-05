@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -71,18 +72,16 @@ _CODE_CHARS_RE = re.compile(r"[A-Z0-9]+")
 _LETTERS_THEN_DIGITS_RE = re.compile(r"[A-Z]{1,4}\d{3,}[A-Z0-9]*")
 
 
+def _compact(token: str) -> str:
+    return _SEPARATORS_RE.sub("", unicodedata.normalize("NFKC", token).upper())
+
+
 def norm_code(value: str) -> str:
-    s = unicodedata.normalize("NFKC", value).upper()
-    s = _SEPARATORS_RE.sub("", s)
-    return s.translate(CYR_TO_LAT)
+    return _compact(value).translate(CYR_TO_LAT)
 
 
 def skeleton(normed: str) -> str:
     return normed.translate(OCR_FOLD)
-
-
-def _compact(token: str) -> str:
-    return _SEPARATORS_RE.sub("", unicodedata.normalize("NFKC", token).upper())
 
 
 def is_ean_like(token: str) -> bool:
@@ -106,9 +105,7 @@ def is_code_like(token: str) -> bool:
     if digits / len(latin) >= 0.4:
         return True
     # letter<->digit alternations catch codes like "GSB13RE" with low digit ratio
-    transitions = sum(
-        1 for a, b in zip(latin, latin[1:], strict=False) if a.isdigit() != b.isdigit()
-    )
+    transitions = sum(1 for a, b in pairwise(latin) if a.isdigit() != b.isdigit())
     if transitions >= 2:
         return True
     return bool(_LETTERS_THEN_DIGITS_RE.fullmatch(latin))

@@ -59,10 +59,7 @@ class EmbeddingService:
         self, dense_texts: list[str], sparse_texts: list[str]
     ) -> tuple[list[list[float]], list[models.SparseVector]]:
         prefixed = [self.profile.doc_prefix + t for t in dense_texts]
-        dense = [
-            v.tolist()
-            for v in self._dense.embed(prefixed, batch_size=self.settings.embed_batch_size)
-        ]
+        dense = [v.tolist() for v in self._dense.embed(prefixed, batch_size=self.settings.embed_batch_size)]
         sparse = [
             models.SparseVector(indices=e.indices.tolist(), values=e.values.tolist())
             for e in self._sparse.embed(sparse_texts, batch_size=self.settings.embed_batch_size)

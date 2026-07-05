@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +19,10 @@ logger = logging.getLogger(__name__)
 class RerankerService:
     def __init__(self, model_name: str):
         self.model_name = model_name
-        self._model = None
+        self._model: CrossEncoder | None = None
         self._lock = asyncio.Lock()
 
-    async def _ensure_loaded(self):
+    async def _ensure_loaded(self) -> CrossEncoder:
         if self._model is not None:
             return self._model
         async with self._lock:

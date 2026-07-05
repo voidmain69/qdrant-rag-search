@@ -100,7 +100,7 @@ class QdrantService:
                 points=[models.PointStruct(id=META_POINT_ID, vector={"stub": [0.0]}, payload=expected)],
             )
             return
-        stored = {k: points[0].payload.get(k) for k in expected}
+        stored = {k: (points[0].payload or {}).get(k) for k in expected}
         if stored != expected:
             raise SchemaMismatchError(
                 f"Collection '{self.collection}' was built with {stored}, but current config is "
@@ -142,9 +142,7 @@ class QdrantService:
             collection_name=self.collection,
             prefetch=[
                 models.Prefetch(query=dense_vector, using="dense", limit=prefetch_limit, filter=flt),
-                models.Prefetch(
-                    query=sparse_vector, using="sparse_text", limit=prefetch_limit, filter=flt
-                ),
+                models.Prefetch(query=sparse_vector, using="sparse_text", limit=prefetch_limit, filter=flt),
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=limit,
@@ -172,6 +170,14 @@ class QdrantService:
         result = await self.client.count(self.collection, exact=True)
         return result.count
 
+    async def ping(self) -> bool:
+        """Cheap reachability check for the readiness probe."""
+        try:
+            return await self.client.collection_exists(self.collection)
+        except Exception:
+            logger.warning("Qdrant ping failed", exc_info=True)
+            return False
+
 
 def build_filter(filters: SearchFilters | None) -> models.Filter | None:
     if filters is None:
@@ -182,9 +188,7 @@ def build_filter(filters: SearchFilters | None) -> models.Filter | None:
             models.FieldCondition(key="brand_norm", match=models.MatchValue(value=filters.brand.lower()))
         )
     if filters.category:
-        must.append(
-            models.FieldCondition(key="category", match=models.MatchValue(value=filters.category))
-        )
+        must.append(models.FieldCondition(key="category", match=models.MatchValue(value=filters.category)))
     if filters.price_min is not None or filters.price_max is not None:
         must.append(
             models.FieldCondition(
@@ -192,9 +196,7 @@ def build_filter(filters: SearchFilters | None) -> models.Filter | None:
             )
         )
     if filters.in_stock is not None:
-        must.append(
-            models.FieldCondition(key="in_stock", match=models.MatchValue(value=filters.in_stock))
-        )
+        must.append(models.FieldCondition(key="in_stock", match=models.MatchValue(value=filters.in_stock)))
     for key, value in filters.attributes.items():
         if isinstance(value, float) and not isinstance(value, bool):
             # Qdrant match conditions don't accept floats — use a degenerate range
@@ -202,9 +204,7 @@ def build_filter(filters: SearchFilters | None) -> models.Filter | None:
                 models.FieldCondition(key=f"attributes.{key}", range=models.Range(gte=value, lte=value))
             )
         else:
-            must.append(
-                models.FieldCondition(key=f"attributes.{key}", match=models.MatchValue(value=value))
-            )
+            must.append(models.FieldCondition(key=f"attributes.{key}", match=models.MatchValue(value=value)))
     return models.Filter(must=must) if must else None
 
 
@@ -224,7 +224,4 @@ def payload_matches_filters(payload: dict[str, Any], filters: SearchFilters | No
     if filters.in_stock is not None and payload.get("in_stock") != filters.in_stock:
         return False
     attrs = payload.get("attributes") or {}
-    for key, value in filters.attributes.items():
-        if attrs.get(key) != value:
-            return False
-    return True
+    return all(attrs.get(key) == value for key, value in filters.attributes.items())

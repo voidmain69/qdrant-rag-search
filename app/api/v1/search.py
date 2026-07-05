@@ -8,7 +8,5 @@ router = APIRouter(tags=["search"])
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search(
-    body: SearchRequest, service: SearchService = Depends(get_search_service)
-) -> SearchResponse:
+async def search(body: SearchRequest, service: SearchService = Depends(get_search_service)) -> SearchResponse:
     return await service.search(body)

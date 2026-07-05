@@ -55,11 +55,12 @@ class IngestService:
         self.code_index = code_index
 
     async def upsert_products(self, items: list[ProductIn]) -> BatchUpsertResult:
-        results = [BatchItemResult(external_id=p.external_id, ok=True) for p in items]
-
+        """Embed and upsert a batch. The pipeline is all-or-nothing: any failure raises
+        (→ HTTP 5xx) and no partial per-item results are produced."""
         # last write wins for duplicated external_ids inside one batch
         unique: dict[str, ProductIn] = {p.external_id: p for p in items}
         products = list(unique.values())
+        point_ids = [point_id_for(p.external_id) for p in products]
 
         dense_texts = [compose_dense_text(p) for p in products]
         sparse_texts = [compose_sparse_text(p) for p in products]
@@ -67,27 +68,25 @@ class IngestService:
 
         points = [
             models.PointStruct(
-                id=point_id_for(p.external_id),
+                id=pid,
                 vector={"dense": dv, "sparse_text": sv},
                 payload=build_payload(p, self.settings.dense_model),
             )
-            for p, dv, sv in zip(products, dense_vecs, sparse_vecs, strict=True)
+            for p, pid, dv, sv in zip(products, point_ids, dense_vecs, sparse_vecs, strict=True)
         ]
 
         batch = self.settings.upsert_batch_size
         for start in range(0, len(points), batch):
             await self.qdrant.upsert_points(points[start : start + batch])
 
-        for p in products:
+        for p, pid in zip(products, point_ids, strict=True):
             self.code_index.add_product(
-                point_id_for(p.external_id),
+                pid,
                 {"article": p.article, "product_code": p.product_code, "ean13": p.ean13},
             )
 
-        succeeded = sum(1 for r in results if r.ok)
-        return BatchUpsertResult(
-            total=len(results), succeeded=succeeded, failed=len(results) - succeeded, items=results
-        )
+        results = [BatchItemResult(external_id=p.external_id, ok=True) for p in items]
+        return BatchUpsertResult(total=len(results), succeeded=len(results), failed=0, items=results)
 
     async def delete_product(self, external_id: str) -> bool:
         point_id = point_id_for(external_id)
