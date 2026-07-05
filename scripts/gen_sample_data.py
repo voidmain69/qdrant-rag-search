@@ -1,0 +1,244 @@
+"""Generate data/sample_products.json — ~40 uk/ru/en products with valid EAN-13s.
+
+Usage: uv run python scripts/gen_sample_data.py
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.services.ean import ean13_check_digit, is_valid_ean13  # noqa: E402
+
+
+def ean(body_or_full: str) -> str:
+    if len(body_or_full) == 13:
+        assert is_valid_ean13(body_or_full), body_or_full
+        return body_or_full
+    assert len(body_or_full) == 12, body_or_full
+    return body_or_full + str(ean13_check_digit(body_or_full))
+
+
+PRODUCTS = [
+    # --- електроінструмент ---
+    dict(external_id="tool-001", name="Дриль ударний Bosch GSB 13 RE", brand="Bosch",
+         category="Електроінструмент", article="GSB-13-RE", product_code="060114E600",
+         ean13="4006381333931", price=3299.0,
+         attributes={"Потужність": "600 Вт", "Патрон": "ШЗП 13 мм", "Удар": "так"},
+         description="Компактний ударний дриль для дому та майстерні. Металевий редуктор, реверс."),
+    dict(external_id="tool-002", name="Перфоратор Bosch GBH 2-26 DRE", brand="Bosch",
+         category="Електроінструмент", article="GBH-2-26-DRE", product_code="0611253708",
+         ean13=ean("316514037194"), price=6799.0,
+         attributes={"Потужність": "800 Вт", "Енергія удару": "2.7 Дж", "Патрон": "SDS-plus"},
+         description="Професійний перфоратор з трьома режимами роботи."),
+    dict(external_id="tool-003", name="Шуруповерт акумуляторний Makita DDF484Z", brand="Makita",
+         category="Електроінструмент", article="DDF484Z", product_code="199907-1",
+         ean13=ean("088381843201"), price=4590.0,
+         attributes={"Напруга": "18 В", "Крутний момент": "54 Нм", "Тип": "безщітковий"},
+         description="Безщітковий дриль-шуруповерт без АКБ та зарядного пристрою."),
+    dict(external_id="tool-004", name="Акумулятор Makita BL1850B 18V 5Ah Li-Ion", brand="Makita",
+         category="Акумулятори та зарядні", article="BL1850B", product_code="632F15-1",
+         ean13=ean("088381461201"), price=2890.0,
+         attributes={"Напруга": "18 В", "Ємність": "5 Аг", "Тип": "Li-Ion", "Індикатор заряду": "так"},
+         description="Оригінальний літій-іонний акумулятор з індикатором заряду для інструментів Makita LXT."),
+    dict(external_id="tool-005", name="Болгарка Makita GA5030 125 мм", brand="Makita",
+         category="Електроінструмент", article="GA5030", product_code="GA5030R",
+         ean13=ean("088381085373"), price=2199.0,
+         attributes={"Потужність": "720 Вт", "Диск": "125 мм"},
+         description="Кутова шліфувальна машина з захистом від пилу."),
+    dict(external_id="tool-006", name="Лобзик електричний DeWalt DW349", brand="DeWalt",
+         category="Електроінструмент", article="DW349", product_code="DW349-QS",
+         ean13=ean("500592399111"), price=3450.0,
+         attributes={"Потужність": "500 Вт", "Хід пилки": "20 мм"},
+         description="Електролобзик з маятниковим ходом для дерева та металу."),
+    dict(external_id="tool-007", name="Шліфмашина ексцентрикова Bosch GEX 125-1 AE", brand="Bosch",
+         category="Електроінструмент", article="GEX-125-1-AE", product_code="0601387500",
+         ean13=ean("316514044836"), price=3899.0,
+         attributes={"Потужність": "250 Вт", "Діаметр підошви": "125 мм"},
+         description="Ексцентрикова шліфувальна машина з регулюванням обертів."),
+    # --- побутова техніка ---
+    dict(external_id="home-001", name="Пилосос бездротовий Dyson V15 Detect Absolute", brand="Dyson",
+         category="Пилососи", article="V15-DT-ABS", product_code="447955-01",
+         ean13=ean("505297298873"), price=32999.0,
+         attributes={"Тип": "бездротовий", "Час роботи": "60 хв", "Ємність": "0.76 л"},
+         description="Бездротовий пилосос для дому з лазерним підсвічуванням пилу та РК-дисплеєм."),
+    dict(external_id="home-002", name="Пилосос-робот Roborock S8", brand="Roborock",
+         category="Пилососи", article="S8-EU-BLK", product_code="R100060",
+         ean13=ean("694784306201"), price=21499.0,
+         attributes={"Тип": "робот", "Потужність всмоктування": "6000 Па", "Вологе прибирання": "так"},
+         description="Робот-пилосос із вологим прибиранням і лідаром для дому та квартири."),
+    dict(external_id="home-003", name="Пилосос дротовий Samsung VC07M25E0WB", brand="Samsung",
+         category="Пилососи", article="VC07M25E0WB", product_code="VC07M25E0WB/UK",
+         ean13=ean("880609582001"), price=3499.0,
+         attributes={"Тип": "дротовий", "Потужність": "750 Вт", "Без мішка": "так"},
+         description="Циклонний пилосос без мішка з контейнером 1.5 л."),
+    dict(external_id="home-004", name="Праска Philips Azur GC4567/86", brand="Philips",
+         category="Праски", article="GC4567/86", product_code="GC4567",
+         ean13=ean("871010387941"), price=2399.0,
+         attributes={"Потужність": "2600 Вт", "Підошва": "SteamGlide Plus", "Паровий удар": "210 г"},
+         description="Парова праска з системою крапля-стоп та самоочищенням."),
+    dict(external_id="home-005", name="Чайник електричний Tefal KI270D30", brand="Tefal",
+         category="Чайники", article="KI270D30", product_code="7211002432",
+         ean13=ean("301680653801"), price=1599.0,
+         attributes={"Об'єм": "1.7 л", "Потужність": "2400 Вт", "Матеріал": "нержавіюча сталь"},
+         description="Електрочайник з нержавіючої сталі з підсвічуванням."),
+    dict(external_id="home-006", name="Мультиварка Moulinex MK708832", brand="Moulinex",
+         category="Мультиварки", article="MK708832", product_code="MK7088",
+         ean13=ean("301046672501"), price=3299.0,
+         attributes={"Об'єм чаші": "5 л", "Програм": "25", "Потужність": "750 Вт"},
+         description="Мультиварка на 25 програм з відкладеним стартом."),
+    dict(external_id="home-007", name="Блендер занурювальний Braun MQ5235", brand="Braun",
+         category="Блендери", article="MQ5235", product_code="MQ5235WH",
+         ean13=ean("425671230890"), price=2799.0,
+         attributes={"Потужність": "1000 Вт", "Швидкості": "21", "Насадки": "вінчик, подрібнювач"},
+         description="Занурювальний блендер з технологією ActiveBlade."),
+    # --- сантехніка ---
+    dict(external_id="san-001", name="Змішувач для умивальника Grohe Eurosmart 33265003", brand="Grohe",
+         category="Змішувачі", article="33265003", product_code="GRH-33265",
+         ean13=ean("400153661201"), price=4299.0,
+         attributes={"Тип": "одноважільний", "Покриття": "хром", "Аератор": "SilkMove"},
+         description="Одноважільний змішувач для умивальника з керамічним картриджем 35 мм."),
+    dict(external_id="san-002", name="Душова система Hansgrohe Crometta E 240", brand="Hansgrohe",
+         category="Душові системи", article="27271000", product_code="HG-27271",
+         ean13=ean("430130566901"), price=13499.0,
+         attributes={"Верхній душ": "240 мм", "Термостат": "так"},
+         description="Душова система з термостатом і верхнім душем 240 мм."),
+    dict(external_id="san-003", name="Фільтр для води проточний Aquafilter FHPRA-12", brand="Aquafilter",
+         category="Фільтри для води", article="FHPRA-12", product_code="AQF-1212",
+         ean13=ean("590123456701"), price=899.0,
+         attributes={"Тип": "проточний", "Підключення": "1/2\""},
+         description="Магістральний фільтр механічного очищення води."),
+    # --- автотовари ---
+    dict(external_id="auto-001", name="Акумулятор автомобільний Varta Blue Dynamic E11 74Ah", brand="Varta",
+         category="Автомобільні акумулятори", article="574012068", product_code="E11-BD",
+         ean13=ean("401649802141"), price=4599.0,
+         attributes={"Ємність": "74 Аг", "Пусковий струм": "680 А", "Полярність": "права"},
+         description="Стартерний акумулятор для легкових авто з бензиновим або дизельним двигуном."),
+    dict(external_id="auto-002", name="Моторна олива Castrol EDGE 5W-30 LL 4л", brand="Castrol",
+         category="Моторні оливи", article="15669A", product_code="CAS-5W30-4",
+         ean13=ean("401486832901"), price=2199.0,
+         attributes={"В'язкість": "5W-30", "Об'єм": "4 л", "Допуск": "VW 504.00/507.00"},
+         description="Повністю синтетична моторна олива з титановою формулою."),
+    dict(external_id="auto-003", name="Щітки склоочисника Bosch Aerotwin A863S 650/450", brand="Bosch",
+         category="Щітки склоочисника", article="3397007863", product_code="A863S",
+         ean13=ean("316573549001"), price=1299.0,
+         attributes={"Довжина": "650/450 мм", "Тип": "безкаркасні"},
+         description="Комплект безкаркасних щіток для VW Golf VII, Audi A3."),
+    dict(external_id="auto-004", name="Відеореєстратор 70mai Dash Cam A810", brand="70mai",
+         category="Відеореєстратори", article="A810-1", product_code="MIDRIVE-A810",
+         ean13=ean("694784794201"), price=6299.0,
+         attributes={"Роздільність": "4K", "GPS": "так", "Wi-Fi": "так"},
+         description="Автомобільний відеореєстратор 4K HDR з GPS та нічним режимом."),
+    # --- електроніка ---
+    dict(external_id="el-001", name="Ноутбук Lenovo IdeaPad Slim 3 15IAH8", brand="Lenovo",
+         category="Ноутбуки", article="83ER008URA", product_code="IP3-15IAH8",
+         ean13=ean("019724712301"), price=27999.0,
+         attributes={"Процесор": "Core i5-12450H", "ОЗП": "16 ГБ", "SSD": "512 ГБ", "Екран": "15.6\" FHD"},
+         description="Ноутбук для роботи та навчання з процесором Intel Core i5."),
+    dict(external_id="el-002", name="Монітор Samsung Odyssey G5 27\" 165Hz", brand="Samsung",
+         category="Монітори", article="LS27CG552EIXCI", product_code="G5-27-165",
+         ean13=ean("880609791201"), price=10999.0,
+         attributes={"Діагональ": "27\"", "Частота": "165 Гц", "Матриця": "VA", "Роздільність": "2560x1440"},
+         description="Ігровий вигнутий монітор QHD 165 Гц з FreeSync Premium."),
+    dict(external_id="el-003", name="Навушники бездротові Sony WH-1000XM5", brand="Sony",
+         category="Навушники", article="WH1000XM5B", product_code="WH-1000XM5",
+         ean13=ean("454263672101"), price=15499.0,
+         attributes={"Тип": "накладні", "Шумозаглушення": "активне", "Час роботи": "30 год"},
+         description="Бездротові навушники з найкращим у класі активним шумозаглушенням."),
+    dict(external_id="el-004", name="Роутер TP-Link Archer AX55 Wi-Fi 6", brand="TP-Link",
+         category="Маршрутизатори", article="ARCHER-AX55", product_code="AX55-EU",
+         ean13=ean("684023352401"), price=3299.0,
+         attributes={"Стандарт": "Wi-Fi 6 AX3000", "Порти": "4x Gigabit", "MU-MIMO": "так"},
+         description="Дводіапазонний гігабітний Wi-Fi 6 роутер для дому."),
+    dict(external_id="el-005", name="Зарядна станція EcoFlow RIVER 2 Pro", brand="EcoFlow",
+         category="Зарядні станції", article="EFR620", product_code="ZMR620-B-EU",
+         ean13=ean("484731235101"), price=24999.0,
+         attributes={"Ємність": "768 Втг", "Вихідна потужність": "800 Вт", "Розеток": "3"},
+         description="Портативна зарядна станція для дому, кемпінгу та резервного живлення."),
+    dict(external_id="el-006", name="Смартфон Samsung Galaxy A55 5G 8/256GB", brand="Samsung",
+         category="Смартфони", article="SM-A556BZKCEUC", product_code="GA55-256",
+         ean13=ean("880611719901"), price=15999.0,
+         attributes={"Екран": "6.6\" Super AMOLED", "Пам'ять": "256 ГБ", "ОЗП": "8 ГБ", "5G": "так"},
+         description="Смартфон середнього класу із захистом IP67 та потрійною камерою."),
+    # --- освітлення ---
+    dict(external_id="light-001", name="Лампа світлодіодна Philips LED E27 13W 4000K", brand="Philips",
+         category="LED лампи", article="929002305217", product_code="LED-E27-13W",
+         ean13=ean("871869976001"), price=129.0,
+         attributes={"Цоколь": "E27", "Потужність": "13 Вт", "Температура": "4000 К", "Світловий потік": "1521 лм"},
+         description="Світлодіодна лампа — аналог лампи розжарювання 100 Вт, нейтральне світло."),
+    dict(external_id="light-002", name="Прожектор LED Videx 50W 5000K IP65", brand="Videx",
+         category="Прожектори", article="VL-F2E-505W", product_code="26236",
+         ean13=ean("482247326801"), price=649.0,
+         attributes={"Потужність": "50 Вт", "Захист": "IP65", "Світловий потік": "5500 лм"},
+         description="Вуличний світлодіодний прожектор із датчиком освітленості."),
+    dict(external_id="light-003", name="Стрічка світлодіодна 12V 2835 120led/m 5м тепла", brand="MTK",
+         category="LED стрічки", article="MTK-2835-120-WW", product_code="L2835WW",
+         ean13=ean("482259663301"), price=449.0,
+         attributes={"Напруга": "12 В", "Діодів на метр": "120", "Довжина": "5 м", "Колір": "теплий білий"},
+         description="Світлодіодна стрічка для підсвічування стелі та меблів."),
+    # --- будматеріали / кріплення ---
+    dict(external_id="fix-001", name="Саморізи по дереву 4.2x76 мм 100 шт", brand="Wkret-Met",
+         category="Кріплення", article="WKD-4276", product_code="42076100",
+         ean13=ean("590711223301"), price=189.0,
+         attributes={"Діаметр": "4.2 мм", "Довжина": "76 мм", "Кількість": "100 шт"},
+         description="Саморізи з потайною головкою та частковою різьбою."),
+    dict(external_id="fix-002", name="Дюбель універсальний Fischer UX 8x50", brand="Fischer",
+         category="Кріплення", article="UX-8-50", product_code="077889",
+         ean13=ean("400512377801"), price=249.0,
+         attributes={"Діаметр": "8 мм", "Довжина": "50 мм", "Матеріал": "нейлон"},
+         description="Універсальний нейлоновий дюбель для повнотілих і пустотілих матеріалів."),
+    dict(external_id="fix-003", name="Піна монтажна Ceresit TS62 750мл зимова", brand="Ceresit",
+         category="Герметики та піни", article="TS62-750W", product_code="2739472",
+         ean13=ean("590120945501"), price=299.0,
+         attributes={"Об'єм": "750 мл", "Сезон": "зимова", "Вихід": "45 л"},
+         description="Професійна монтажна піна зі збільшеним виходом."),
+    # --- сад/город ---
+    dict(external_id="garden-001", name="Тример акумуляторний Gardena ComfortCut 23/18V P4A", brand="Gardena",
+         category="Тримери", article="14700-20", product_code="GRD-14700",
+         ean13=ean("403586614301"), price=5499.0,
+         attributes={"Напруга": "18 В", "Ширина скошування": "23 см"},
+         description="Акумуляторний тример для трави з телескопічною штангою."),
+    dict(external_id="garden-002", name="Шланг поливальний Cellfast Green ATS 1/2\" 50м", brand="Cellfast",
+         category="Шланги", article="15-101", product_code="CF15101",
+         ean13=ean("590126122201"), price=1899.0,
+         attributes={"Діаметр": "1/2\"", "Довжина": "50 м", "Шарів": "3"},
+         description="Тришаровий армований садовий шланг, стійкий до перегинів."),
+    dict(external_id="garden-003", name="Секатор площинний Fiskars SingleStep P26", brand="Fiskars",
+         category="Секатори", article="111260", product_code="1000567",
+         ean13=ean("640246977801"), price=799.0,
+         attributes={"Тип": "площинний", "Діаметр різу": "20 мм"},
+         description="Секатор для живих гілок з антифрикційним покриттям."),
+    # --- спорт ---
+    dict(external_id="sport-001", name="Велосипед гірський Trek Marlin 5 Gen 2 29\"", brand="Trek",
+         category="Велосипеди", article="5255602", product_code="MARLIN5-29",
+         ean13=ean("076868342201"), price=27999.0,
+         attributes={"Колеса": "29\"", "Рама": "алюміній", "Швидкостей": "16"},
+         description="Гірський велосипед для крос-кантрі та міста."),
+    dict(external_id="sport-002", name="Гантелі розбірні 2x20 кг сталеві", brand="Intertool",
+         category="Гантелі", article="SP-20x2", product_code="ITL-2020",
+         ean13=ean("482116987201"), price=3499.0,
+         attributes={"Вага": "2x20 кг", "Матеріал": "сталь"},
+         description="Набір розбірних гантелей з гумованими дисками."),
+]
+
+
+def main() -> None:
+    out = Path(__file__).resolve().parents[1] / "data" / "sample_products.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    products = []
+    for p in PRODUCTS:
+        p = dict(p)
+        p["ean13"] = ean(p["ean13"]) if len(p["ean13"]) != 13 else p["ean13"]
+        assert is_valid_ean13(p["ean13"]), p["external_id"]
+        p.setdefault("currency", "UAH")
+        p.setdefault("in_stock", True)
+        products.append(p)
+    ids = [p["external_id"] for p in products]
+    assert len(ids) == len(set(ids)), "duplicate external_id"
+    out.write_text(json.dumps(products, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Wrote {len(products)} products to {out}")
+
+
+if __name__ == "__main__":
+    main()

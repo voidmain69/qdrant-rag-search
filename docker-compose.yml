@@ -1,0 +1,44 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST + dashboard (http://localhost:6333/dashboard)
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      API_KEYS: ${API_KEYS:-change-me-secret-key}
+      DENSE_MODEL: ${DENSE_MODEL:-intfloat/multilingual-e5-large}
+      DENSE_DIM: ${DENSE_DIM:-1024}
+      SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
+      SPARSE_LANGUAGE: ${SPARSE_LANGUAGE:-russian}
+      RERANK_ENABLED: ${RERANK_ENABLED:-false}
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - model_cache:/models   # ~2.2 GB of ONNX models, downloaded once on first start
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 300s   # first start downloads embedding models
+
+volumes:
+  qdrant_data:
+  model_cache:

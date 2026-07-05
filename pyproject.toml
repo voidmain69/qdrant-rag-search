@@ -1,0 +1,49 @@
+[project]
+name = "qdrant-product-search"
+version = "0.1.0"
+description = "Production-grade hybrid product search service on Qdrant: semantic + BM25 + exact/fuzzy code matching"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.139,<1.0",
+    "uvicorn[standard]>=0.35",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.10",
+    "qdrant-client>=1.18,<2.0",
+    "fastembed>=0.8,<0.9",
+    "rapidfuzz>=3.14,<4.0",
+    "python-multipart>=0.0.20",
+    "openpyxl>=3.1",
+    "orjson>=3.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "httpx>=0.28",
+    "ruff>=0.12",
+]
+rerank = [
+    "sentence-transformers>=5.0",
+    "torch>=2.7",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: requires running docker compose stack",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/api/**" = ["B008"]           # Depends() in defaults is idiomatic FastAPI
+"scripts/gen_sample_data.py" = ["E501"]
