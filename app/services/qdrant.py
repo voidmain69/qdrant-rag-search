@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.core.config import Settings
 from app.models.search import SearchFilters
@@ -14,6 +16,25 @@ from app.models.search import SearchFilters
 logger = logging.getLogger(__name__)
 
 META_POINT_ID = 1
+
+# transient transport failures (DNS hiccup, dropped socket) must not surface as 5xx:
+# every operation we retry is idempotent (upsert by id, retrieve, query, delete by id)
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY_S = 0.5
+
+
+async def _with_retry[T](op: Callable[[], Awaitable[T]], what: str) -> T:
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            return await op()
+        except ResponseHandlingException:
+            if attempt == RETRY_ATTEMPTS - 1:
+                raise
+            delay = RETRY_BASE_DELAY_S * 2**attempt
+            logger.warning("Qdrant %s failed (attempt %d), retrying in %.1fs", what, attempt + 1, delay)
+            await asyncio.sleep(delay)
+    raise AssertionError("unreachable")
+
 
 PAYLOAD_KEYWORD_INDEXES = ["article_norm", "product_code_norm", "ean13", "brand_norm", "category"]
 
@@ -29,7 +50,11 @@ class QdrantService:
         self.settings = settings
         self.collection = settings.collection_name
         self.meta_collection = settings.meta_collection_name
-        self.client = AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key or None)
+        # generous timeout: large upsert batches + transient resource pressure must not
+        # surface as ConnectTimeout/5xx when Qdrant itself is healthy
+        self.client = AsyncQdrantClient(
+            url=settings.qdrant_url, api_key=settings.qdrant_api_key or None, timeout=30
+        )
 
     async def close(self) -> None:
         await self.client.close()
@@ -111,14 +136,20 @@ class QdrantService:
     # --- write path ---
 
     async def upsert_points(self, points: list[models.PointStruct]) -> None:
-        await self.client.upsert(self.collection, points=points, wait=True)
+        await _with_retry(lambda: self.client.upsert(self.collection, points=points, wait=True), "upsert")
 
     async def delete_point(self, point_id: str) -> bool:
-        existing = await self.client.retrieve(self.collection, ids=[point_id], with_payload=False)
+        existing = await _with_retry(
+            lambda: self.client.retrieve(self.collection, ids=[point_id], with_payload=False),
+            "retrieve",
+        )
         if not existing:
             return False
-        await self.client.delete(
-            self.collection, points_selector=models.PointIdsList(points=[point_id]), wait=True
+        await _with_retry(
+            lambda: self.client.delete(
+                self.collection, points_selector=models.PointIdsList(points=[point_id]), wait=True
+            ),
+            "delete",
         )
         return True
 
@@ -127,7 +158,10 @@ class QdrantService:
     async def retrieve_payloads(self, point_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not point_ids:
             return {}
-        points = await self.client.retrieve(self.collection, ids=point_ids, with_payload=True)
+        points = await _with_retry(
+            lambda: self.client.retrieve(self.collection, ids=point_ids, with_payload=True),
+            "retrieve",
+        )
         return {str(p.id): p.payload or {} for p in points}
 
     async def hybrid_query(
@@ -138,15 +172,20 @@ class QdrantService:
         limit: int,
     ) -> list[models.ScoredPoint]:
         prefetch_limit = max(self.settings.prefetch_limit, limit)
-        response = await self.client.query_points(
-            collection_name=self.collection,
-            prefetch=[
-                models.Prefetch(query=dense_vector, using="dense", limit=prefetch_limit, filter=flt),
-                models.Prefetch(query=sparse_vector, using="sparse_text", limit=prefetch_limit, filter=flt),
-            ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=limit,
-            with_payload=True,
+        response = await _with_retry(
+            lambda: self.client.query_points(
+                collection_name=self.collection,
+                prefetch=[
+                    models.Prefetch(query=dense_vector, using="dense", limit=prefetch_limit, filter=flt),
+                    models.Prefetch(
+                        query=sparse_vector, using="sparse_text", limit=prefetch_limit, filter=flt
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=limit,
+                with_payload=True,
+            ),
+            "query_points",
         )
         return response.points
 
@@ -154,12 +193,16 @@ class QdrantService:
         """Payload-only scroll over all points, yielding code fields for CodeIndex bootstrap."""
         offset = None
         while True:
-            points, offset = await self.client.scroll(
-                self.collection,
-                limit=1000,
-                offset=offset,
-                with_payload=CODE_PAYLOAD_FIELDS,
-                with_vectors=False,
+            current_offset = offset
+            points, offset = await _with_retry(
+                lambda: self.client.scroll(
+                    self.collection,
+                    limit=1000,
+                    offset=current_offset,  # noqa: B023 — invoked immediately by _with_retry
+                    with_payload=CODE_PAYLOAD_FIELDS,
+                    with_vectors=False,
+                ),
+                "scroll",
             )
             for p in points:
                 yield str(p.id), p.payload or {}
