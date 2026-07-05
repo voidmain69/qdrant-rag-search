@@ -112,7 +112,7 @@ class TestCoverageWithEnrichment:
 
 
 class TestEnrichService:
-    def service(self, payload=None, status=200, calls=None) -> ProductEnrichmentService:
+    def service(self, payload=None, status=200, calls=None, **settings_kw) -> ProductEnrichmentService:
         def handler(request: httpx.Request) -> httpx.Response:
             if calls is not None:
                 calls.append(request)
@@ -120,14 +120,24 @@ class TestEnrichService:
             return httpx.Response(status, json=body)
 
         client = OllamaClient("http://ollama.test", transport=httpx.MockTransport(handler))
-        return ProductEnrichmentService(client, make_settings())
+        return ProductEnrichmentService(client, make_settings(**settings_kw))
 
-    async def test_product_with_attributes_is_skipped(self):
+    async def test_attribute_rich_product_is_enriched_by_default(self):
+        # default: every product gets synonyms (the cross-lingual recall lever); supplier
+        # attributes still win on merge — see build_payload tests above
         calls: list[httpx.Request] = []
         svc = self.service(LLM_ANSWER, calls=calls)
         rich = ProductIn(external_id="x", name="y", attributes={"Сокет": "LGA 1200"})
+        e = await svc.enrich(rich)
+        assert e is not None and "безщітковий" in e.synonyms
+        assert len(calls) == 1  # LLM was called for the attribute-rich product
+
+    async def test_attribute_rich_skipped_when_flag_off(self):
+        calls: list[httpx.Request] = []
+        svc = self.service(LLM_ANSWER, calls=calls, ingest_enrich_with_attributes=False)
+        rich = ProductIn(external_id="x", name="y", attributes={"Сокет": "LGA 1200"})
         assert await svc.enrich(rich) is None
-        assert calls == []  # supplier attributes are ground truth — no LLM call
+        assert calls == []  # no LLM call for attribute-rich product
 
     async def test_gap_product_is_enriched(self):
         e = await self.service(LLM_ANSWER).enrich(DRILL)
@@ -137,9 +147,8 @@ class TestEnrichService:
     async def test_llm_error_returns_none(self):
         assert await self.service(status=500).enrich(DRILL) is None
 
-    async def test_enrich_all_preserves_order_and_failures(self):
+    async def test_enrich_all_order(self):
         svc = self.service(LLM_ANSWER)
         rich = ProductIn(external_id="r", name="n", attributes={"a": "b"})
         results = await svc.enrich_all([rich, DRILL])
-        assert results[0] is None
-        assert results[1] is not None
+        assert results[0] is not None and results[1] is not None  # both enriched by default

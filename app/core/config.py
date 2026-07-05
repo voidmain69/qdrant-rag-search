@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     ingest_llm_model: str = "gemma4:e4b"
     ingest_llm_timeout_s: float = Field(default=60.0, gt=0)
     ingest_llm_concurrency: int = Field(default=2, ge=1, le=8)
+    # enrich products that ALREADY have supplier attributes too — their gain is the
+    # uk/ru/en synonyms (the biggest cross-lingual recall lever; measured to beat BGE-M3),
+    # while supplier attributes still win on merge. False = only attribute-less products
+    # (cheaper: one fewer LLM call per attribute-rich product).
+    ingest_enrich_with_attributes: bool = True
 
     prefetch_limit: int = 50
     schema_version: int = 1

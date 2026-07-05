@@ -91,6 +91,13 @@ module = [
     "openpyxl.*",
     "prometheus_fastapi_instrumentator.*",
     "rapidfuzz.*",
-    "sentence_transformers.*",
 ]
 ignore_missing_imports = true
+
+# sentence-transformers (optional rerank group) is treated as opaque whether or not it
+# is installed — its CrossEncoder API shifts between versions and mypy must behave the
+# same in CI (dep absent) and on a rerank-enabled dev box (dep present).
+[[tool.mypy.overrides]]
+module = ["sentence_transformers.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

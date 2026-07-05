@@ -9,14 +9,17 @@ query-side translation (measured: gemma4:e4b mistranslates «безщітков�
 query but reads `Brushless` straight off a card).
 
 Policy decisions:
-* **Only products without structured attributes are enriched** — supplier attributes
-  are ground truth, the LLM fills gaps, never competes with real data.
-* **Product-provided fields always win** on merge (`build_payload`).
+* **Every product is enriched** by default — the biggest win is the uk/ru/en synonyms,
+  which help cross-lingual recall regardless of whether the product has attributes (a
+  3-way benchmark showed e5+BM25+enrichment beating raw BGE-M3 precisely because of these
+  synonyms). Set `INGEST_ENRICH_WITH_ATTRIBUTES=false` to enrich only attribute-less
+  products (one fewer LLM call per attribute-rich product).
+* **Supplier fields always win** on merge (`build_payload`) — the LLM only fills gaps,
+  never overwrites real attributes.
 * **Graceful**: any LLM failure → the product is ingested unenriched; outcomes are
   visible in `ingest_enrichment_total{outcome}`.
 * Throughput reality (~6–16 s/product on a local GPU; far faster on a cloud provider):
-  fine for API upserts and background imports of gap-products; a full 100k-catalog
-  enrichment is an offline batch job, not an inline step.
+  a one-time cost — `content_hash` skips re-enriching unchanged products on re-push.
 
 The backend (local Ollama or OpenAI-compatible) is injected as an :class:`LLMClient`.
 """
@@ -97,10 +100,13 @@ class ProductEnrichmentService:
         self._model = settings.ingest_llm_model
         self._timeout = settings.ingest_llm_timeout_s
         self._semaphore = asyncio.Semaphore(settings.ingest_llm_concurrency)
+        self._enrich_with_attributes = settings.ingest_enrich_with_attributes
 
     def should_enrich(self, product: ProductIn) -> bool:
-        """Supplier attributes are ground truth — the LLM only fills gaps."""
-        return not product.attributes
+        """Enrich every product for its synonyms/spec/use-cases; supplier attributes
+        still win on merge. Unless INGEST_ENRICH_WITH_ATTRIBUTES=false, then only
+        attribute-less products are enriched."""
+        return self._enrich_with_attributes or not product.attributes
 
     async def enrich(self, product: ProductIn) -> Enrichment | None:
         """Enrichment for one product, or None (skip / LLM failure) — ingestion

@@ -467,16 +467,17 @@ All settings via environment / `.env` (see `.env.example`, parsed by pydantic-se
 | `QUERY_LLM_ENABLED` | `false` | LLM query understanding for strict mode |
 | `QUERY_LLM_MODEL` | `gemma4:e4b` | model for requirement extraction (`gpt-4o-mini` for openai) |
 | `QUERY_LLM_TIMEOUT_S` | `30.0` | LLM call budget; on timeout search degrades to heuristics |
-| `INGEST_LLM_ENABLED` | `false` | LLM enrichment of attribute-less products at ingest (pre-embedding) |
+| `INGEST_LLM_ENABLED` | `false` | LLM enrichment at ingest (pre-embedding) |
 | `INGEST_LLM_MODEL` | `gemma4:e4b` | model for ingest enrichment |
 | `INGEST_LLM_TIMEOUT_S` / `INGEST_LLM_CONCURRENCY` | `60` / `2` | per-product budget and parallelism |
+| `INGEST_ENRICH_WITH_ATTRIBUTES` | `true` | enrich products that already have attributes too (for synonyms); `false` = attribute-less only |
 | `DEBUG` | `false` | debug logging |
 
 Changing `DENSE_MODEL`/`DENSE_DIM`/`SPARSE_MODEL` against an existing collection triggers the `service_meta` guard: the service exits with a clear reindex instruction instead of mixing incompatible vectors.
 
 ### Pre-embedding enrichment (optional)
 
-With `INGEST_LLM_ENABLED=true`, products arriving **without structured attributes** are enriched once at ingest by the local Ollama LLM: structured `attributes` (filterable facts), uk/ru/en `synonyms` (into the BM25 sparse text — «материнка» finds "motherboard"), a literal `spec_summary` and `use_cases` (into the dense vector). Supplier-provided fields always win on merge; any LLM failure ingests the product unenriched. The enrichment block is stored in the payload and counts as product text for strict-mode coverage — an alias generated at ingest covers a query term with zero query-time LLM cost. Rationale, guardrails and throughput math: `docs/pipeline_assessment.md`.
+With `INGEST_LLM_ENABLED=true`, **every** product is enriched once at ingest by the configured LLM: structured `attributes` (filterable facts, gaps only — supplier attributes win on merge), uk/ru/en `synonyms` (into the BM25 sparse text — «материнка» finds "motherboard"), a literal `spec_summary` and `use_cases` (into the dense vector). The synonyms are the highest-value part: a 3-way benchmark (branch `experiment/bge-m3`) found **e5+BM25+enrichment beats raw BGE-M3** on uk/ru/en queries precisely because of them, so enrichment now runs even for products that already have attributes (set `INGEST_ENRICH_WITH_ATTRIBUTES=false` for attribute-less only). Any LLM failure ingests the product unenriched; `content_hash` skips re-enriching unchanged products on re-push. The enrichment block is stored in the payload and counts as product text for strict-mode coverage. Rationale, guardrails and throughput math: `docs/pipeline_assessment.md`.
 
 ### Observability
 

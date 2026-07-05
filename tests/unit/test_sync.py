@@ -165,7 +165,7 @@ class TestReconcile:
         assert qdrant.store[point_id_for("p3")]["status"] == "archived"
 
     async def test_already_archived_not_recounted(self):
-        service, qdrant = await self._seed()
+        service, _qdrant = await self._seed()
         await service.set_archived(["p2"], archived=True)
         r = await service.reconcile(["p1"], dry_run=False, max_archived=None)
         assert r.external_ids == ["p3"]  # p2 was already archived
