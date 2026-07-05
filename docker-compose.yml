@@ -20,7 +20,13 @@ services:
       - "8000:8000"
     environment:
       QDRANT_URL: http://qdrant:6333
-      API_KEYS: ${API_KEYS:-change-me-secret-key}
+      # no default on purpose: compose fails fast instead of shipping a well-known secret
+      API_KEYS: ${API_KEYS:?Set API_KEYS in .env (cp .env.example .env)}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_FORMAT: ${LOG_FORMAT:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.0}
       DENSE_MODEL: ${DENSE_MODEL:-intfloat/multilingual-e5-large}
       DENSE_DIM: ${DENSE_DIM:-1024}
       SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
