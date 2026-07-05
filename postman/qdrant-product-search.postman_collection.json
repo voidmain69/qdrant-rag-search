@@ -1,0 +1,389 @@
+{
+  "info": {
+    "_postman_id": "b7f3e2a1-9c4d-4f8a-8e21-qdrantsearch01",
+    "name": "Qdrant Product Search",
+    "description": "Hybrid product search service: semantic (dense e5) + BM25 sparse with server-side RRF fusion + in-memory exact/fuzzy code matching, plus optional LLM query understanding (strict mode) and ingest enrichment.\n\n## Quick start\n1. Open the **Variables** tab and set `baseUrl` (default `http://localhost:8000`) and `apiKey` (matches one of the service's `API_KEYS`; default `change-me-secret-key`).\n2. Run **Products → Upsert product** to ingest a sample product.\n3. Run any request under **Search**.\n\nAuth: every `/api/v1/**` request sends `X-API-Key: {{apiKey}}` (collection-level auth). `/health`, `/ready`, `/metrics` are open.\n\nFull contract: `README.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "X-API-Key", "type": "string" },
+      { "key": "value", "value": "{{apiKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness (/health)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Always 200 while the process is up."
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness (/ready)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/ready", "host": ["{{baseUrl}}"], "path": ["ready"] },
+            "description": "200 once models are loaded, the CodeIndex is built and Qdrant is reachable; 503 while starting or if Qdrant is unreachable."
+          },
+          "response": []
+        },
+        {
+          "name": "Metrics (/metrics)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/metrics", "host": ["{{baseUrl}}"], "path": ["metrics"] },
+            "description": "Prometheus exposition: HTTP metrics plus search_requests_total{query_kind}, search_latency_seconds{query_kind}, query_understanding_total{outcome}, ingest_enrichment_total{outcome}. Available when METRICS_ENABLED=true."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Upsert product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('succeeded', () => pm.expect(body.succeeded).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_id\": \"tool-001\",\n  \"name\": \"Дриль ударний Bosch GSB 13 RE\",\n  \"description\": \"Компактний ударний дриль для свердління бетону, цегли та металу.\",\n  \"brand\": \"Bosch\",\n  \"category\": \"Електроінструмент\",\n  \"article\": \"GSB-13-RE\",\n  \"product_code\": \"060114E600\",\n  \"ean13\": \"4006381333931\",\n  \"attributes\": { \"Потужність\": \"600 Вт\", \"Патрон\": \"ШЗП 13 мм\" },\n  \"price\": 3299.0,\n  \"currency\": \"UAH\",\n  \"in_stock\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"]
+            },
+            "description": "Upsert one product. Re-ingesting the same external_id replaces it (deterministic point id)."
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert batch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"external_id\": \"tool-002\",\n      \"name\": \"Шуруповерт акумуляторний Makita DDF484Z\",\n      \"brand\": \"Makita\",\n      \"category\": \"Електроінструмент\",\n      \"article\": \"DDF484Z\",\n      \"attributes\": { \"Напруга\": \"18 В\", \"Тип двигуна\": \"Brushless\" },\n      \"price\": 4599.0\n    },\n    {\n      \"external_id\": \"tool-003\",\n      \"name\": \"Пилосос бездротовий Dyson V11\",\n      \"brand\": \"Dyson\",\n      \"category\": \"Побутова техніка\",\n      \"article\": \"SV14\",\n      \"ean13\": \"5025155036075\",\n      \"price\": 15999.0\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products:batch",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products:batch"]
+            },
+            "description": "Upsert up to 1000 products in one request."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace product (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_id\": \"tool-001\",\n  \"name\": \"Дриль ударний Bosch GSB 13 RE (оновлено)\",\n  \"brand\": \"Bosch\",\n  \"category\": \"Електроінструмент\",\n  \"article\": \"GSB-13-RE\",\n  \"product_code\": \"060114E600\",\n  \"ean13\": \"4006381333931\",\n  \"price\": 3199.0\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/tool-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "tool-001"]
+            },
+            "description": "Full replace. The external_id in the path must equal the one in the body (else 422)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete product",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/tool-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "tool-001"]
+            },
+            "description": "204 on success, 404 if the product does not exist."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Imports",
+      "item": [
+        {
+          "name": "Start file import",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 Accepted', () => pm.response.to.have.status(202));",
+                  "const job = pm.response.json();",
+                  "if (job.job_id) { pm.collectionVariables.set('jobId', job.job_id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "CSV / JSON / XLSX catalog file (max 100 MB)."
+                },
+                {
+                  "key": "column_mapping",
+                  "value": "{\"Артикул виробника\": \"article\", \"Штрих-код\": \"ean13\", \"Назва\": \"name\"}",
+                  "type": "text",
+                  "description": "Optional JSON mapping of source columns to ProductIn fields."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/imports",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "imports"]
+            },
+            "description": "Select a file in the Body → form-data → `file` field, then Send. Returns 202 with a job_id (captured into the `jobId` collection variable by the test script)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get import job",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/imports/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "imports", "{{jobId}}"]
+            },
+            "description": "Poll import progress: { status, total, processed, failed, errors[≤100] }."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Semantic phrase (text)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"бездротовий пилосос для дому\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Natural language → dense + sparse hybrid search with server-side RRF fusion (branch = hybrid)."
+          },
+          "response": []
+        },
+        {
+          "name": "Characteristics (units stay text)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"акумулятор 18V 5Ah Li-Ion\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Measurement tokens (18V, 5Ah) are recognized as units, not product codes → query_kind = text."
+          },
+          "response": []
+        },
+        {
+          "name": "Exact article (code_only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"GSB-13-RE\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "O(1) exact code lookup, no vector search (branch = exact, matched_field = article)."
+          },
+          "response": []
+        },
+        {
+          "name": "Cyrillic homoglyph SKU",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"НВ-500Т\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "SKU typed on a Ukrainian keyboard: Cyrillic Н→H, В→B, Т→T homoglyph normalization."
+          },
+          "response": []
+        },
+        {
+          "name": "Mistyped EAN-13 (corrected)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"4006381333932\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "EAN with one wrong check digit → checksum-aware correction (branch = ean_corrected)."
+          },
+          "response": []
+        },
+        {
+          "name": "Mixed (code + text)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"дриль GSB13RE з кейсом\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Both branches run; exact code hits are pinned above hybrid results (query_kind = mixed)."
+          },
+          "response": []
+        },
+        {
+          "name": "Strict mode (confident vs alternatives)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"мат плата з hdmi на 1200\",\n  \"mode\": \"strict\",\n  \"limit\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "items = products covering every requirement; near-misses go to `alternatives` with match.missing_terms. With QUERY_LLM_ENABLED=true the requirement variants come from the LLM (dictionary-free synonyms); otherwise per-token heuristics."
+          },
+          "response": []
+        },
+        {
+          "name": "With filters",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"ударний дриль 600 Вт\",\n  \"limit\": 10,\n  \"offset\": 0,\n  \"filters\": {\n    \"brand\": \"Bosch\",\n    \"category\": \"Електроінструмент\",\n    \"price_min\": 1000,\n    \"price_max\": 5000,\n    \"in_stock\": true,\n    \"attributes\": { \"Патрон\": \"ШЗП 13 мм\" }\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "All filters are optional and AND-combined; brand is case-insensitive."
+          },
+          "response": []
+        },
+        {
+          "name": "With reranking",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"потужний дриль для бетону з реверсом\",\n  \"limit\": 10,\n  \"rerank\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Cross-encoder rerank of the hybrid branch. Requires RERANK_ENABLED=true on the instance, else returns 400."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "apiKey", "value": "change-me-secret-key", "type": "string" },
+    { "key": "jobId", "value": "", "type": "string" }
+  ]
+}
