@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.product import ProductIn
+    from app.services.enrichment import Enrichment
 
 # Uppercase Cyrillic letters visually identical to Latin ones (uk/ru keyboards & OCR).
 CYR_TO_LAT = str.maketrans(
@@ -115,9 +116,11 @@ def tokenize_query(query: str) -> list[str]:
     return [t for t in query.split() if t]
 
 
-def compose_dense_text(p: ProductIn) -> str:
+def compose_dense_text(p: ProductIn, enrichment: Enrichment | None = None) -> str:
     """Semantic embedding text. Codes/SKU/EAN are deliberately excluded so that
-    alphanumeric noise does not pollute the dense vector."""
+    alphanumeric noise does not pollute the dense vector. LLM enrichment contributes
+    the factual parts (spec summary, use cases) — never the synonym list, which would
+    only dilute the vector (e5 already models semantic closeness)."""
     parts: list[str] = [p.name.strip()]
     if p.brand:
         parts.append(f"Бренд: {p.brand.strip()}.")
@@ -128,20 +131,33 @@ def compose_dense_text(p: ProductIn) -> str:
         parts.append(attrs + ".")
     if p.description:
         parts.append(" ".join(p.description.split())[:800])
+    if enrichment is not None:
+        if enrichment.spec_summary:
+            parts.append(enrichment.spec_summary)
+        if enrichment.attributes:
+            parts.append("; ".join(f"{k}: {v}" for k, v in enrichment.attributes.items()) + ".")
+        if enrichment.use_cases:
+            parts.append("Застосування: " + "; ".join(enrichment.use_cases) + ".")
     return " ".join(parts)
 
 
-def compose_sparse_text(p: ProductIn) -> str:
+def compose_sparse_text(p: ProductIn, enrichment: Enrichment | None = None) -> str:
     """BM25 text: semantic text PLUS all code fields (raw and normalized) so the
-    hybrid branch gets lexical exact-match power on codes for free."""
-    codes: list[str] = []
+    hybrid branch gets lexical exact-match power on codes for free. LLM synonyms and
+    the normalized title go here (and only here): lexical recall for «материнка» /
+    "mobo" without polluting the dense vector."""
+    extras: list[str] = []
     for value in (p.article, p.product_code, p.ean13):
         if value:
-            codes.append(str(value))
+            extras.append(str(value))
             normed = norm_code(str(value))
             if normed and normed != str(value):
-                codes.append(normed)
-    return " ".join([compose_dense_text(p), *codes]).strip()
+                extras.append(normed)
+    if enrichment is not None:
+        if enrichment.normalized_title:
+            extras.append(enrichment.normalized_title)
+        extras.extend(enrichment.synonyms)
+    return " ".join([compose_dense_text(p, enrichment), *extras]).strip()
 
 
 def compose_sparse_query(query: str, code_tokens: list[str]) -> str:

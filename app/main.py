@@ -14,10 +14,13 @@ from app.core.logging import configure_logging
 from app.core.monitoring import init_sentry, setup_metrics
 from app.services.code_index import CodeIndex
 from app.services.embedding import EmbeddingService
+from app.services.enrichment import ProductEnrichmentService
 from app.services.importer import JobStore
 from app.services.ingest import IngestService
+from app.services.llm import build_llm_client
 from app.services.qdrant import QdrantService
 from app.services.query_router import SearchService
+from app.services.query_understanding import QueryUnderstandingService
 from app.services.reranker import RerankerService
 
 logger = logging.getLogger(__name__)
@@ -47,17 +50,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     reranker = RerankerService(settings.rerank_model) if settings.rerank_enabled else None
 
+    # one LLM backend (Ollama or OpenAI-compatible) shared by both LLM features
+    llm_client = build_llm_client(settings) if settings.llm_enabled else None
+    provider = settings.llm_provider.value
+
+    understanding = (
+        QueryUnderstandingService(llm_client, settings) if llm_client and settings.query_llm_enabled else None
+    )
+    if understanding:
+        logger.info("LLM query understanding enabled (%s via %s)", settings.query_llm_model, provider)
+        warmup_task = asyncio.create_task(understanding.warmup())
+        warmup_task.add_done_callback(lambda _t: None)  # keep a reference until it completes
+
+    enricher = (
+        ProductEnrichmentService(llm_client, settings) if llm_client and settings.ingest_llm_enabled else None
+    )
+    if enricher:
+        logger.info("LLM ingest enrichment enabled (%s via %s)", settings.ingest_llm_model, provider)
+
     app.state.qdrant = qdrant
     app.state.embedder = embedder
     app.state.code_index = code_index
-    app.state.ingest_service = IngestService(settings, embedder, qdrant, code_index)
-    app.state.search_service = SearchService(settings, qdrant, embedder, code_index, reranker)
+    app.state.ingest_service = IngestService(settings, embedder, qdrant, code_index, enricher)
+    app.state.search_service = SearchService(settings, qdrant, embedder, code_index, reranker, understanding)
     app.state.job_store = JobStore()
     app.state.ready = True
     logger.info("Service ready")
 
     yield
 
+    if llm_client:
+        await llm_client.aclose()
     await qdrant.close()
 
 

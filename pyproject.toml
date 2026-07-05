@@ -15,6 +15,8 @@ dependencies = [
     "python-multipart>=0.0.20",
     "openpyxl>=3.1",
     "orjson>=3.10",
+    # LLM backends (Ollama / OpenAI-compatible) are called over plain HTTP
+    "httpx>=0.28",
     # observability
     "asgi-correlation-id>=4.3",
     "prometheus-client>=0.21",
@@ -68,6 +70,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.ruff.lint.per-file-ignores]
 "app/api/**" = ["B008"]           # Depends() in defaults is idiomatic FastAPI
 "scripts/gen_sample_data.py" = ["E501", "C408"]  # dict(...) rows read better for sample data
+"app/services/llm.py" = ["ASYNC109"]  # timeout is a per-call httpx budget, not an asyncio.timeout
 
 [tool.ruff.format]
 docstring-code-format = true

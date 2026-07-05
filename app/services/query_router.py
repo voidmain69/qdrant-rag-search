@@ -28,10 +28,11 @@ from app.models.search import (
     SearchResponse,
 )
 from app.services.code_index import STRONG_CODE_SCORE, CodeHit, CodeIndex
-from app.services.coverage import coverage, significant_tokens
+from app.services.coverage import Requirement, fallback_requirements, requirements_coverage
 from app.services.embedding import EmbeddingService
 from app.services.normalization import compose_sparse_query, is_code_like, tokenize_query
 from app.services.qdrant import QdrantService, build_filter, payload_matches_filters
+from app.services.query_understanding import QueryUnderstandingService
 from app.services.reranker import RerankerService
 
 logger = logging.getLogger(__name__)
@@ -75,12 +76,14 @@ class SearchService:
         embedder: EmbeddingService,
         code_index: CodeIndex,
         reranker: RerankerService | None,
+        understanding: QueryUnderstandingService | None = None,
     ):
         self.settings = settings
         self.qdrant = qdrant
         self.embedder = embedder
         self.code_index = code_index
         self.reranker = reranker
+        self.understanding = understanding
 
     async def search(self, req: SearchRequest) -> SearchResponse:
         if req.rerank and self.reranker is None:
@@ -104,7 +107,8 @@ class SearchService:
             code_items = await self._code_hits_to_items(code_hits, req)
             items = _merge(code_items, hybrid_items)
 
-        _annotate_coverage(req.query, items)
+        requirements = await self._understand_query(req)
+        _annotate_coverage(requirements, items)
 
         alternatives: list[SearchHit] = []
         if req.mode == SearchMode.STRICT:
@@ -132,6 +136,15 @@ class SearchService:
         return SearchResponse(
             query_kind=cls.kind, took_ms=took_ms, total=total, items=items, alternatives=alternatives
         )
+
+    async def _understand_query(self, req: SearchRequest) -> list[Requirement]:
+        """LLM requirements (synonyms/translations, strict mode only — it costs one
+        local-LLM call); heuristic per-token requirements everywhere else."""
+        if req.mode == SearchMode.STRICT and self.understanding is not None:
+            extracted = await self.understanding.extract(req.query)
+            if extracted is not None:
+                return extracted
+        return fallback_requirements(req.query)
 
     # --- code branch ---
 
@@ -201,13 +214,12 @@ class SearchService:
         return top + items[self.settings.rerank_top_k :]
 
 
-def _annotate_coverage(query: str, items: list[SearchHit]) -> None:
+def _annotate_coverage(requirements: list[Requirement], items: list[SearchHit]) -> None:
     """Stamp query_coverage / missing_terms on hybrid-branch hits (both modes:
     even in relaxed mode clients see how well each hit matches the request)."""
-    tokens = significant_tokens(query)
     for item in items:
         if item.match.branch is MatchBranch.HYBRID:
-            ratio, missing = coverage(tokens, item.product)
+            ratio, missing = requirements_coverage(requirements, item.product)
             item.match.query_coverage = round(ratio, 3)
             item.match.missing_terms = missing or None
 

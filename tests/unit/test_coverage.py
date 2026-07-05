@@ -3,7 +3,13 @@ no motherboard has both HDMI and socket 1200. Confident results must cover every
 requested characteristic; near-misses are alternatives with missing_terms explaining why.
 """
 
-from app.services.coverage import coverage, significant_tokens
+from app.services.coverage import (
+    Requirement,
+    coverage,
+    fallback_requirements,
+    requirements_coverage,
+    significant_tokens,
+)
 
 MB_WITH_HDMI = {
     "external_id": "mb-1",
@@ -67,3 +73,36 @@ class TestCoverage:
 
     def test_empty_tokens_vacuously_covered(self):
         assert coverage([], MB_WITH_HDMI) == (1.0, [])
+
+
+class TestRequirementsCoverage:
+    """Requirements carry LLM-generated variants — synonymization without dictionaries."""
+
+    def test_multiword_variant(self):
+        req = Requirement("материнська плата", ("материнська плата", "motherboard"))
+        assert requirements_coverage([req], MB_WITH_HDMI) == (1.0, [])
+
+    def test_synonym_variant_covers_english_attribute(self):
+        # "безщітковий" is nowhere in the product — the "brushless" variant covers it
+        drill = {
+            "name": "Шуруповерт акумуляторний Makita DDF484Z",
+            "attributes": {"Тип двигуна": "Brushless"},
+        }
+        req = Requirement("безщітковий", ("безщітковий", "brushless", "бесщеточный"))
+        assert requirements_coverage([req], drill) == (1.0, [])
+
+    def test_socket_format_variant(self):
+        # LLM expands "на 1200" into formats; "lga 1200" matches the attribute value
+        req = Requirement("сокет 1200", ("s1200", "lga 1200"))
+        assert requirements_coverage([req], MB_WITH_HDMI) == (1.0, [])
+
+    def test_missing_reports_requirement_name(self):
+        req = Requirement("hdmi", ("hdmi", "hdmi порт"))
+        ratio, missing = requirements_coverage([req], {"name": "Материнська плата"})
+        assert ratio == 0.0
+        assert missing == ["hdmi"]
+
+    def test_fallback_requirements_mirror_tokens(self):
+        reqs = fallback_requirements("мат плата з hdmi")
+        assert [r.name for r in reqs] == ["мат", "плата", "hdmi"]
+        assert all(r.variants == (r.name,) for r in reqs)

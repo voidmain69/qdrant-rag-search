@@ -257,11 +257,13 @@ Filters are applied inside the vector query (indexed payload fields) for the hyb
 Vector search always returns the *nearest* products — even when nothing in the catalog satisfies every requested characteristic. `mode` controls what happens then:
 
 - **`relaxed`** (default) — one ranked list, nearest-first. Hybrid hits still carry `match.query_coverage` and `match.missing_terms`, so clients can see how well each hit matches.
-- **`strict`** — `items` contains only products the service is *sure* about: every significant query term (stopwords dropped) is present in the product's own fields, or the product was hit by a strong code tier. Everything else that still covers ≥ 50 % of the request lands in `alternatives`, each with `missing_terms` naming exactly what it lacks.
+- **`strict`** — `items` contains only products the service is *sure* about: every requirement of the query is present in the product's own fields, or the product was hit by a strong code tier. Everything else that still covers ≥ 50 % of the request lands in `alternatives`, each with `missing_terms` naming exactly what it lacks.
 
 Example: `{"query": "мат плата з hdmi на 1200", "mode": "strict"}` against a catalog where no board has both HDMI and LGA 1200 → `items` is empty (nothing to over-promise), and the LGA 1200 board without HDMI comes back in `alternatives` with `"missing_terms": ["hdmi"]`.
 
-Term matching is heuristic and unit-tested: numbers match on digit boundaries (`1200` ≠ `12000`, but matches `LGA1200`), alphabetic tokens match by prefix (`мат` covers «Материнська»), tokens ≥ 5 chars tolerate a changed final char (`плати` covers «плата»).
+**Requirement extraction.** With `QUERY_LLM_ENABLED=true`, strict mode sends the query (once per unique query, LRU-cached) to the configured LLM backend (`LLM_PROVIDER`: local Ollama or OpenAI-compatible) that generates lexical variants per query token — synonyms, uk/ru/en translations, abbreviations, value formats — with no hand-maintained dictionaries: «на 1200» is covered by `LGA 1200`. If the LLM is off, times out, or answers garbage, the service degrades to per-token heuristics (this is also the relaxed-mode annotation path — relaxed never pays LLM latency). Full analysis, incl. why SPLADE was rejected for uk/ru: `docs/search_semantics.md`.
+
+Variant matching is heuristic and unit-tested: numbers match on digit boundaries (`1200` ≠ `12000`, but matches `LGA1200`), alphabetic tokens match by prefix (`мат` covers «Материнська»), tokens ≥ 5 chars tolerate a changed final char (`плати` covers «плата»).
 
 ---
 
@@ -431,9 +433,23 @@ All settings via environment / `.env` (see `.env.example`, parsed by pydantic-se
 | `RERANK_ENABLED` | `false` | allow `rerank=true` requests |
 | `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | cross-encoder model |
 | `RERANK_TOP_K` | `50` | how many hybrid hits get reranked |
+| `LLM_PROVIDER` | `ollama` | LLM backend: `ollama` (local) or `openai` (OpenAI / any OpenAI-compatible endpoint) |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint (`host.docker.internal` from Docker) |
+| `OPENAI_API_KEY` | — | required when `LLM_PROVIDER=openai` and an LLM feature is on |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL (vLLM, LiteLLM, Groq, …) |
+| `QUERY_LLM_ENABLED` | `false` | LLM query understanding for strict mode |
+| `QUERY_LLM_MODEL` | `gemma4:e4b` | model for requirement extraction (`gpt-4o-mini` for openai) |
+| `QUERY_LLM_TIMEOUT_S` | `30.0` | LLM call budget; on timeout search degrades to heuristics |
+| `INGEST_LLM_ENABLED` | `false` | LLM enrichment of attribute-less products at ingest (pre-embedding) |
+| `INGEST_LLM_MODEL` | `gemma4:e4b` | model for ingest enrichment |
+| `INGEST_LLM_TIMEOUT_S` / `INGEST_LLM_CONCURRENCY` | `60` / `2` | per-product budget and parallelism |
 | `DEBUG` | `false` | debug logging |
 
 Changing `DENSE_MODEL`/`DENSE_DIM`/`SPARSE_MODEL` against an existing collection triggers the `service_meta` guard: the service exits with a clear reindex instruction instead of mixing incompatible vectors.
+
+### Pre-embedding enrichment (optional)
+
+With `INGEST_LLM_ENABLED=true`, products arriving **without structured attributes** are enriched once at ingest by the local Ollama LLM: structured `attributes` (filterable facts), uk/ru/en `synonyms` (into the BM25 sparse text — «материнка» finds "motherboard"), a literal `spec_summary` and `use_cases` (into the dense vector). Supplier-provided fields always win on merge; any LLM failure ingests the product unenriched. The enrichment block is stored in the payload and counts as product text for strict-mode coverage — an alias generated at ingest covers a query term with zero query-time LLM cost. Rationale, guardrails and throughput math: `docs/pipeline_assessment.md`.
 
 ### Observability
 

@@ -32,7 +32,17 @@ services:
       SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
       SPARSE_LANGUAGE: ${SPARSE_LANGUAGE:-russian}
       RERANK_ENABLED: ${RERANK_ENABLED:-false}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      QUERY_LLM_ENABLED: ${QUERY_LLM_ENABLED:-false}
+      QUERY_LLM_MODEL: ${QUERY_LLM_MODEL:-gemma4:e4b}
+      INGEST_LLM_ENABLED: ${INGEST_LLM_ENABLED:-false}
+      INGEST_LLM_MODEL: ${INGEST_LLM_MODEL:-gemma4:e4b}
       DEBUG: ${DEBUG:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach host-side Ollama from the container
     volumes:
       - model_cache:/models   # ~2.2 GB of ONNX models, downloaded once on first start
     depends_on:

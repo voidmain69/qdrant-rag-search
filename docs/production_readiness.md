@@ -11,6 +11,7 @@ Status legend: ✅ done · 🟡 partial / documented tradeoff · ⬜ deliberatel
 | Consistent error contract | ✅ | 401/400/404/413/422 + JSON 500 from the global exception handler; `rerank=true` on a non-rerank instance is 400 for **every** query kind |
 | Embedding-model / collection compatibility guard | ✅ | `service_meta` collection; refuses to start on mismatch |
 | Pagination semantics | 🟡 | `total` counts candidates within the prefetch window (documented), not the whole collection |
+| Strict mode / LLM degradation | ✅ | Ollama failure, timeout or bad JSON → per-token heuristic coverage; search never depends on the LLM (`docs/search_semantics.md`) |
 
 ## Security
 

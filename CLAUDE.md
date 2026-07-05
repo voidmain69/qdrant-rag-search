@@ -34,6 +34,9 @@ All five checks (lint, format --check, mypy, pytest, docker build) must pass —
 - **`service_meta` collection guards model compatibility** — changing DENSE_MODEL/DIM/SPARSE_MODEL requires reindex; the service refuses to start on mismatch.
 - **CodeIndex is per-replica in-memory state**, guarded by a lock; every mutation must go through `add_product`/`remove_product`.
 - `ENVIRONMENT=production` refuses to start with empty `API_KEYS`; compose has no default secret (`${API_KEYS:?}` — `.env` is mandatory).
+- **LLM backend** (`app/services/llm.py`): a single `LLMClient` abstraction — `OllamaClient` or `OpenAIClient` (OpenAI or any OpenAI-compatible endpoint), selected by `LLM_PROVIDER`, built once in `main.py` and shared by both LLM features. Providers are added here; callers stay provider-agnostic and only ever see `complete_json` + `LLMError`.
+- **Strict mode & coverage**: `strict` search splits confident hits from `alternatives` via requirement coverage (`app/services/coverage.py`). Synonymization is dictionary-free: LLM query understanding (`app/services/query_understanding.py`, `QUERY_LLM_ENABLED`), strict-mode-only, LRU-cached, always degrades to token heuristics on failure. No hand-maintained synonym dictionaries — see `docs/search_semantics.md` (incl. why SPLADE was rejected: no multilingual checkpoint in fastembed).
+- **Ingest enrichment** (`app/services/enrichment.py`, `INGEST_LLM_ENABLED`): LLM enriches only products **without** supplier attributes (ground truth wins on merge); failure → ingest unenriched. Synonyms go to sparse text only, spec/use-cases to dense. Pipeline decisions: `docs/pipeline_assessment.md`.
 - Observability is wired in `app/core/{logging,monitoring}.py` + `app/main.py`: request-id on every log record, JSON logs outside development, Prometheus `/metrics`, Sentry via `SENTRY_DSN`.
 
 ## This Windows host (important)
@@ -44,3 +47,4 @@ All five checks (lint, format --check, mypy, pytest, docker build) must pass —
   `$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")`
 - An intermittent onnxruntime access-violation trace during pytest collection is a known flake — ignore it if tests pass.
 - E2E tests default to `X-API-Key: change-me-secret-key` (`E2E_API_KEY` overrides); local `.env` is gitignored.
+- Ollama runs in the `ollama` container (RTX 3080 Ti, model `gemma4:e4b`); cold model load can take minutes and blocks its HTTP API — warm it up before latency-sensitive tests. From the api container it's `http://host.docker.internal:11434`.

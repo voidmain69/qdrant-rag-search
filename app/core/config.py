@@ -16,6 +16,11 @@ class LogFormat(StrEnum):
     JSON = "json"
 
 
+class LLMProvider(StrEnum):
+    OLLAMA = "ollama"  # local, via OLLAMA_URL
+    OPENAI = "openai"  # OpenAI or any OpenAI-compatible endpoint (OPENAI_BASE_URL)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True
@@ -51,6 +56,28 @@ class Settings(BaseSettings):
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_top_k: int = 50
 
+    # --- LLM backend (shared by query understanding and ingest enrichment) ---
+    # ollama: local model at OLLAMA_URL; openai: OpenAI / any OpenAI-compatible API.
+    llm_provider: LLMProvider = LLMProvider.OLLAMA
+    ollama_url: str = "http://localhost:11434"
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    # --- LLM query understanding (strict mode) ---
+    query_llm_enabled: bool = False
+    # ollama default gemma4:e4b; for openai set e.g. gpt-4o-mini
+    query_llm_model: str = "gemma4:e4b"
+    # measured 6-23s per call on gemma4:e4b / RTX 3080 Ti under WSL2 (huge variance from
+    # GPU paravirtualization); results are LRU-cached and search degrades to token
+    # fallback past the budget — a cloud provider is far faster, tune down accordingly
+    query_llm_timeout_s: float = Field(default=30.0, gt=0)
+
+    # --- LLM product enrichment at ingest (pre-embedding) ---
+    ingest_llm_enabled: bool = False
+    ingest_llm_model: str = "gemma4:e4b"
+    ingest_llm_timeout_s: float = Field(default=60.0, gt=0)
+    ingest_llm_concurrency: int = Field(default=2, ge=1, le=8)
+
     prefetch_limit: int = 50
     schema_version: int = 1
 
@@ -61,6 +88,19 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == Environment.PRODUCTION
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.query_llm_enabled or self.ingest_llm_enabled
+
+    @model_validator(mode="after")
+    def _guard_openai(self) -> "Settings":
+        if self.llm_enabled and self.llm_provider == LLMProvider.OPENAI and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY must be set when LLM_PROVIDER=openai and an LLM feature "
+                "(QUERY_LLM_ENABLED / INGEST_LLM_ENABLED) is enabled."
+            )
+        return self
 
     @model_validator(mode="after")
     def _apply_env_defaults(self) -> "Settings":

@@ -11,6 +11,7 @@ from qdrant_client import models
 from app.core.config import Settings
 from app.models.search import SearchMode, SearchRequest
 from app.services.code_index import CodeIndex
+from app.services.coverage import Requirement
 from app.services.query_router import SearchService
 
 MB_WITH_HDMI = {
@@ -117,3 +118,67 @@ async def test_strict_mode_pagination_counts_confident_only():
 @pytest.mark.parametrize("mode", [SearchMode.RELAXED, SearchMode.STRICT])
 async def test_mode_accepted_in_request_model(mode):
     assert SearchRequest(query="x", mode=mode).mode is mode
+
+
+class StubUnderstanding:
+    """Stands in for the Ollama-backed QueryUnderstandingService."""
+
+    def __init__(self, requirements):
+        self.requirements = requirements
+        self.calls = 0
+
+    async def extract(self, query):
+        self.calls += 1
+        return self.requirements
+
+
+BRUSHLESS_DRILL = {
+    "external_id": "drl-1",
+    "name": "Шуруповерт акумуляторний Makita DDF484Z",
+    "attributes": {"Тип двигуна": "Brushless"},
+}
+
+BRUSHLESS_QUERY = "безщітковий шуруповерт makita"
+
+BRUSHLESS_REQS = [
+    Requirement("шуруповерт", ("шуруповерт", "дриль-шуруповерт", "screwdriver")),
+    Requirement("безщітковий", ("безщітковий", "brushless", "бесщеточный")),
+    Requirement("makita", ("makita", "макіта")),
+]
+
+
+async def test_llm_synonyms_make_hit_confident():
+    """Lexically "безщітковий" is nowhere in the product; the LLM variant "brushless"
+    covers it, so strict mode returns the product as a confident item."""
+    service = make_service([BRUSHLESS_DRILL])
+    service.understanding = StubUnderstanding(BRUSHLESS_REQS)  # type: ignore[assignment]
+    resp = await service.search(SearchRequest(query=BRUSHLESS_QUERY, mode=SearchMode.STRICT))
+    assert [h.product["external_id"] for h in resp.items] == ["drl-1"]
+    assert resp.items[0].match.query_coverage == 1.0
+
+
+async def test_without_llm_same_query_degrades_to_alternative():
+    service = make_service([BRUSHLESS_DRILL])  # understanding=None → token fallback
+    resp = await service.search(SearchRequest(query=BRUSHLESS_QUERY, mode=SearchMode.STRICT))
+    assert resp.items == []
+    assert [h.product["external_id"] for h in resp.alternatives] == ["drl-1"]
+    assert resp.alternatives[0].match.missing_terms == ["безщітковий"]
+
+
+async def test_llm_failure_falls_back_to_tokens():
+    class FailingUnderstanding:
+        async def extract(self, query):
+            return None  # Ollama down / unparseable
+
+    service = make_service([BRUSHLESS_DRILL])
+    service.understanding = FailingUnderstanding()  # type: ignore[assignment]
+    resp = await service.search(SearchRequest(query=BRUSHLESS_QUERY, mode=SearchMode.STRICT))
+    assert [h.product["external_id"] for h in resp.alternatives] == ["drl-1"]
+
+
+async def test_relaxed_mode_never_calls_llm():
+    service = make_service([BRUSHLESS_DRILL])
+    stub = StubUnderstanding(BRUSHLESS_REQS)
+    service.understanding = stub  # type: ignore[assignment]
+    await service.search(SearchRequest(query=BRUSHLESS_QUERY, mode=SearchMode.RELAXED))
+    assert stub.calls == 0
