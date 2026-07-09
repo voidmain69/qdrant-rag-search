@@ -1,0 +1,14 @@
+# Streamlit admin / testing / eval console — deliberately independent of the API's heavy
+# ONNX/embedding deps (it only talks HTTP), so it stays a small, fast image.
+FROM python:3.13-slim-bookworm
+
+WORKDIR /app
+RUN pip install --no-cache-dir "streamlit>=1.40" "httpx>=0.28"
+
+COPY ui ./ui
+COPY scripts ./scripts
+COPY eval ./eval
+COPY data ./data
+
+EXPOSE 8501
+CMD ["streamlit", "run", "ui/Home.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

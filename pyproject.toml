@@ -37,6 +37,11 @@ rerank = [
     "sentence-transformers>=5.0",
     "torch>=2.7",
 ]
+# admin/testing/eval console — `uv run --group ui streamlit run ui/Home.py`
+ui = [
+    "streamlit>=1.40",
+    "httpx>=0.28",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

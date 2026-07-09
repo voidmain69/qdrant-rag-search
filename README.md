@@ -526,6 +526,10 @@ uv run --no-sync python scripts/eval_search.py --compare eval/baseline.json --la
 
 Details, metrics and caveats (small-sample noise, judged-pool bias): `eval/README.md`.
 
+### Console (Streamlit)
+
+`docker compose up -d --build` also starts an internal admin/testing/eval console at **http://localhost:8501** — pages for **Ingest** (form / bulk / price / lifecycle), **Search** (query playground with the full match explanation), and **Evaluate** (run the harness, per-segment scorecard, diff vs baseline, add labels). It talks to the API over HTTP only, so the API key stays server-side. See `ui/README.md`.
+
 Layout:
 
 ```
@@ -539,6 +543,7 @@ scripts/               # gen_sample_data, download_models, smoke_search, eval_se
 tests/unit             # normalization, EAN, code index, query classification, sync, enrichment
 tests/integration      # full e2e over HTTP (marker: integration)
 eval/                  # labelled query set + baseline for search-quality scoring
+ui/                    # Streamlit admin/testing/eval console (compose service `ui`, :8501)
 ```
 
 Unit tests never import ONNX (the FastEmbed import is deferred into `EmbeddingService.__init__`), so they run anywhere in ~2 s.

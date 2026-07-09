@@ -55,6 +55,23 @@ services:
       retries: 60
       start_period: 300s   # first start downloads embedding models
 
+  # internal admin / testing / eval console (Streamlit) — talks to the api over HTTP
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://api:8000
+      API_KEY: ${API_KEYS:?}   # server-side; the key never reaches the browser
+    volumes:
+      - ./eval:/app/eval       # labels added in the UI persist back to the repo
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   qdrant_data:
   model_cache:
