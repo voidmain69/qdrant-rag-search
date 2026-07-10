@@ -293,7 +293,9 @@ Example: `{"query": "мат плата з hdmi на 1200", "mode": "strict"}` ag
 
 **Requirement extraction.** With `QUERY_LLM_ENABLED=true`, strict mode sends the query (once per unique query, LRU-cached) to the configured LLM backend (`LLM_PROVIDER`: local Ollama or OpenAI-compatible) that generates lexical variants per query token — synonyms, uk/ru/en translations, abbreviations, value formats — with no hand-maintained dictionaries: «на 1200» is covered by `LGA 1200`. If the LLM is off, times out, or answers garbage, the service degrades to per-token heuristics (this is also the relaxed-mode annotation path — relaxed never pays LLM latency). Full analysis, incl. why SPLADE was rejected for uk/ru: `docs/search_semantics.md`.
 
-Variant matching is heuristic and unit-tested: numbers match on digit boundaries (`1200` ≠ `12000`, but matches `LGA1200`), alphabetic tokens match by prefix (`мат` covers «Материнська»), tokens ≥ 5 chars tolerate a changed final char (`плати` covers «плата»).
+Variant matching is heuristic and unit-tested: numbers match on digit boundaries (`1200` ≠ `12000`, but matches `LGA1200`), alphabetic tokens match by prefix (`мат` covers «Материнська»), tokens ≥ 5 chars tolerate a changed final char (`плати` covers «плата»), and **measurement units match across script/spelling** — a query «165 гц» covers a spec written `165 Hz`, «27 дюймів» covers `27 inch` (the `гц`/`Hz`, `дюйм`/`inch`, `Вт`/`W` … equivalences are curated in `coverage.py`).
+
+In strict mode the LLM query-understanding call runs **concurrently** with the vector search (it depends only on the query), so its latency is hidden behind the search round-trip instead of added to the tail; a pure-code lookup that short-circuits skips it entirely.
 
 ---
 

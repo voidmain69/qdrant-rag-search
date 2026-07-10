@@ -100,15 +100,19 @@ class SearchService:
         strong = [h for h in code_hits if h.score >= STRONG_CODE_SCORE]
 
         if cls.kind == QueryKind.CODE_ONLY and strong:
-            # unambiguous code lookup — no vector search needed
+            # unambiguous code lookup — no vector search, and no hybrid hits to annotate,
+            # so query understanding (an LLM call in strict mode) would be wasted work
             items = await self._code_hits_to_items(code_hits, req)
         else:
-            hybrid_items = await self._hybrid_search(req, cls)
-            code_items = await self._code_hits_to_items(code_hits, req)
-            items = _merge(code_items, hybrid_items)
-
-        requirements = await self._understand_query(req)
-        _annotate_coverage(requirements, items)
+            # query understanding depends only on req.query, so run it concurrently with
+            # the vector search + merge rather than after — in strict mode this hides the
+            # LLM latency (up to query_llm_timeout_s) behind the search round-trip instead
+            # of adding it to the tail
+            items, requirements = await asyncio.gather(
+                self._search_and_merge(code_hits, req, cls),
+                self._understand_query(req),
+            )
+            _annotate_coverage(requirements, items)
 
         alternatives: list[SearchHit] = []
         if req.mode == SearchMode.STRICT:
@@ -179,6 +183,13 @@ class SearchService:
                 )
             )
         return items
+
+    async def _search_and_merge(
+        self, code_hits: list[CodeHit], req: SearchRequest, cls: QueryClassification
+    ) -> list[SearchHit]:
+        hybrid_items = await self._hybrid_search(req, cls)
+        code_items = await self._code_hits_to_items(code_hits, req)
+        return _merge(code_items, hybrid_items)
 
     # --- hybrid branch ---
 
