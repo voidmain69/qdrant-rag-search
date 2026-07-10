@@ -1,13 +1,33 @@
+import asyncio
+
 import httpx
 import orjson
 
 from app.core.config import Settings
-from app.services.llm import OllamaClient
+from app.services.llm import LLMClient, OllamaClient
 from app.services.query_understanding import (
     QueryUnderstandingService,
     build_requirements,
     parse_variants,
 )
+
+
+class _GatedClient(LLMClient):
+    """LLM client whose call blocks until `gate` is set, so a test can hold a call
+    in-flight and start a second concurrent one — exercising singleflight."""
+
+    def __init__(self, answer: str):
+        self._answer = answer
+        self.calls = 0
+        self.gate = asyncio.Event()
+
+    async def complete_json(self, prompt: str, *, model: str, max_tokens: int, timeout: float) -> str:
+        self.calls += 1
+        await self.gate.wait()
+        return self._answer
+
+    async def aclose(self) -> None: ...
+
 
 LLM_ANSWER = {
     "мат": ["материнська", "материнская", "motherboard"],
@@ -100,3 +120,27 @@ class TestExtract:
         client = OllamaClient("http://ollama.test", transport=httpx.MockTransport(handler))
         svc = QueryUnderstandingService(client, make_settings())
         assert await svc.extract("щось цікаве") is None
+
+    async def test_singleflight_coalesces_concurrent_identical_queries(self):
+        # two concurrent identical cold queries must ride one LLM call, not stampede it
+        client = _GatedClient(orjson.dumps(LLM_ANSWER).decode())
+        svc = QueryUnderstandingService(client, make_settings())
+        query = "мат плата з hdmi на 1200"
+        t1 = asyncio.create_task(svc.extract(query))
+        t2 = asyncio.create_task(svc.extract(query))
+        await asyncio.sleep(0)  # let both reach the in-flight await before releasing
+        await asyncio.sleep(0)
+        client.gate.set()
+        r1, r2 = await asyncio.gather(t1, t2)
+        assert r1 is not None and r1 == r2
+        assert client.calls == 1  # coalesced onto a single model call
+
+    async def test_inflight_cleared_after_completion(self):
+        # a subsequent identical query after the first completes still serves from cache
+        client = _GatedClient(orjson.dumps(LLM_ANSWER).decode())
+        svc = QueryUnderstandingService(client, make_settings())
+        client.gate.set()
+        first = await svc.extract("мат плата з hdmi на 1200")
+        again = await svc.extract("мат плата з hdmi на 1200")
+        assert first == again
+        assert client.calls == 1  # second served from cache, no new call

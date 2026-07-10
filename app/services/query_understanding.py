@@ -22,6 +22,7 @@ because fastembed 0.8 ships no multilingual SPLADE checkpoint (see docs/search_s
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 
@@ -67,6 +68,9 @@ class QueryUnderstandingService:
         self._model = settings.query_llm_model
         self._timeout = settings.query_llm_timeout_s
         self._cache: OrderedDict[str, list[Requirement]] = OrderedDict()
+        # singleflight: coalesce concurrent identical cold queries onto one LLM call
+        # instead of a thundering herd all missing the cache and all calling the model
+        self._inflight: dict[str, asyncio.Task[list[Requirement] | None]] = {}
 
     async def warmup(self) -> None:
         await self._client.warmup(self._model)
@@ -84,6 +88,18 @@ class QueryUnderstandingService:
             self._cache.move_to_end(key)
             UNDERSTANDING_TOTAL.labels(outcome="cache_hit").inc()
             return cached
+        # ride an in-flight identical call if one is already running (no second LLM hit)
+        running = self._inflight.get(key)
+        if running is not None:
+            return await running
+        task = asyncio.ensure_future(self._compute(query, tokens, key))
+        self._inflight[key] = task
+        try:
+            return await task
+        finally:
+            self._inflight.pop(key, None)
+
+    async def _compute(self, query: str, tokens: list[str], key: str) -> list[Requirement] | None:
         prompt = PROMPT_TEMPLATE.replace("{query}", query).replace("{tokens}", orjson.dumps(tokens).decode())
         try:
             raw = await self._client.complete_json(

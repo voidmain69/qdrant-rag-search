@@ -152,3 +152,23 @@ class TestEnrichService:
         rich = ProductIn(external_id="r", name="n", attributes={"a": "b"})
         results = await svc.enrich_all([rich, DRILL])
         assert results[0] is not None and results[1] is not None  # both enriched by default
+
+    async def test_enrich_all_dedups_identical_cards(self):
+        # two products with identical card text (attributes are NOT part of the card) must
+        # cost one LLM call, not two — the results are aligned back to both positions
+        calls: list[httpx.Request] = []
+        svc = self.service(LLM_ANSWER, calls=calls)
+        p1 = ProductIn(external_id="a", name="Дриль ударний", attributes={"x": "1"})
+        p2 = ProductIn(external_id="b", name="Дриль ударний", attributes={"y": "2"})
+        results = await svc.enrich_all([p1, p2])
+        assert results[0] is not None and results[0] == results[1]
+        assert len(calls) == 1  # shared card → single call
+
+    async def test_enrich_all_preserves_order_with_skips(self):
+        # a skipped product maps to None in place; the enriched one keeps its slot
+        calls: list[httpx.Request] = []
+        svc = self.service(LLM_ANSWER, calls=calls, ingest_enrich_with_attributes=False)
+        rich = ProductIn(external_id="r", name="n", attributes={"a": "b"})  # skipped (has attrs)
+        results = await svc.enrich_all([rich, DRILL])
+        assert results[0] is None and results[1] is not None
+        assert len(calls) == 1  # only the gap product hit the LLM

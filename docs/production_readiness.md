@@ -39,6 +39,7 @@ Status legend: ✅ done · 🟡 partial / documented tradeoff · ⬜ deliberatel
 | Fail-fast startup | ✅ | model load, collection init and CodeIndex bootstrap complete before `ready=true` |
 | Bounded in-memory state | ✅ | JobStore evicts finished jobs beyond 500; CodeIndex is by design per-replica (README scaling notes) |
 | Thread-safety of shared state | ✅ | CodeIndex guards reads and mutations with a lock; fuzzy scan works on snapshots |
+| LLM transient-failure resilience | ✅ | `llm.py` retries genuinely transient LLM failures (429/502/503/504 + transport errors) with exponential backoff; read/pool timeouts (slow model, not down) degrade instead of doubling latency. Enrichment dedups identical product cards in a batch (N copies → one call); query understanding coalesces concurrent identical queries (singleflight) so a cold-cache stampede is one call, not N |
 | Graceful shutdown | 🟡 | uvicorn drains requests; an in-flight import job dies with the process (in-memory JobStore — documented single-instance tradeoff, move to Redis/DB when scaling out) |
 | Multi-replica story | 🟡 | stateless except CodeIndex + JobStore; documented in README scaling notes |
 
