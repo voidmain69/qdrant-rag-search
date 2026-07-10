@@ -76,6 +76,8 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 "app/api/**" = ["B008"]           # Depends() in defaults is idiomatic FastAPI
 "scripts/gen_sample_data.py" = ["E501", "C408"]  # dict(...) rows read better for sample data
 "app/services/llm.py" = ["ASYNC109"]  # timeout is a per-call httpx budget, not an asyncio.timeout
+# a fake LLMClient overrides complete_json, so it must mirror the ABC's `timeout` param
+"tests/unit/test_query_understanding.py" = ["ASYNC109"]
 
 [tool.ruff.format]
 docstring-code-format = true

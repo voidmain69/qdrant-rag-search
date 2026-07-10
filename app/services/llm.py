@@ -12,8 +12,10 @@ importing httpx or knowing which backend is configured.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -24,9 +26,52 @@ logger = logging.getLogger(__name__)
 # keep an Ollama model resident between requests so only the first call pays the load cost
 OLLAMA_KEEP_ALIVE = "30m"
 
+# A transient blip must not permanently degrade a product (unenriched forever) or force a
+# strict query onto the heuristic path — retry the genuinely transient failures with
+# exponential backoff. Deliberately NOT retried: read/pool timeouts (the model is slow,
+# not down — retrying only doubles latency; the caller degrades gracefully) and HTTP 4xx /
+# 500 (a real error the same request won't fix). 429/502/503/504 and transport-level
+# network errors are the retryable set.
+LLM_RETRY_ATTEMPTS = 3
+LLM_RETRY_BASE_DELAY_S = 0.5
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+
 
 class LLMError(RuntimeError):
     """Any failure talking to the LLM backend (transport, HTTP status, bad body)."""
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE_STATUS
+    if isinstance(exc, httpx.ReadTimeout | httpx.PoolTimeout):
+        return False  # slow model / saturated pool — retrying just doubles latency
+    return isinstance(exc, httpx.TransportError)
+
+
+async def _with_llm_retry(
+    attempt: Callable[[], Awaitable[str]], *, what: str, max_attempts: int, base_delay: float
+) -> str:
+    """Run one LLM request attempt, retrying transient failures; map everything else to
+    :class:`LLMError` so callers stay provider- and httpx-agnostic."""
+    for i in range(max_attempts):
+        try:
+            return await attempt()
+        except Exception as exc:
+            if i < max_attempts - 1 and isinstance(exc, httpx.HTTPError) and _is_retryable(exc):
+                delay = base_delay * 2**i
+                logger.warning(
+                    "LLM %s transient failure (attempt %d/%d), retrying in %.1fs: %s",
+                    what,
+                    i + 1,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise LLMError(f"{what} request failed: {exc}") from exc
+    raise AssertionError("unreachable")
 
 
 class LLMClient(ABC):
@@ -45,12 +90,21 @@ class LLMClient(ABC):
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, base_url: str, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        max_attempts: int = LLM_RETRY_ATTEMPTS,
+        retry_base_delay: float = LLM_RETRY_BASE_DELAY_S,
+    ):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(transport=transport)
+        self._max_attempts = max_attempts
+        self._retry_base_delay = retry_base_delay
 
     async def complete_json(self, prompt: str, *, model: str, max_tokens: int, timeout: float) -> str:
-        try:
+        async def _attempt() -> str:
             response = await self._client.post(
                 f"{self.base_url}/api/generate",
                 json={
@@ -65,8 +119,10 @@ class OllamaClient(LLMClient):
             )
             response.raise_for_status()
             return str(response.json()["response"])
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            raise LLMError(f"Ollama request failed: {exc}") from exc
+
+        return await _with_llm_retry(
+            _attempt, what="Ollama", max_attempts=self._max_attempts, base_delay=self._retry_base_delay
+        )
 
     async def warmup(self, model: str) -> None:
         try:
@@ -93,12 +149,22 @@ class OpenAIClient(LLMClient):
     """OpenAI Chat Completions with JSON mode. Works against api.openai.com or any
     OpenAI-compatible server (vLLM, LiteLLM, Groq, local proxies) via OPENAI_BASE_URL."""
 
-    def __init__(self, base_url: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        max_attempts: int = LLM_RETRY_ATTEMPTS,
+        retry_base_delay: float = LLM_RETRY_BASE_DELAY_S,
+    ):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(transport=transport, headers={"Authorization": f"Bearer {api_key}"})
+        self._max_attempts = max_attempts
+        self._retry_base_delay = retry_base_delay
 
     async def complete_json(self, prompt: str, *, model: str, max_tokens: int, timeout: float) -> str:
-        try:
+        async def _attempt() -> str:
             response = await self._client.post(
                 f"{self.base_url}/chat/completions",
                 json={
@@ -112,8 +178,10 @@ class OpenAIClient(LLMClient):
             )
             response.raise_for_status()
             return str(response.json()["choices"][0]["message"]["content"])
-        except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
-            raise LLMError(f"OpenAI request failed: {exc}") from exc
+
+        return await _with_llm_retry(
+            _attempt, what="OpenAI", max_attempts=self._max_attempts, base_delay=self._retry_base_delay
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -114,6 +114,11 @@ class ProductEnrichmentService:
         if not self.should_enrich(product):
             ENRICHMENT_TOTAL.labels(outcome="skipped").inc()
             return None
+        return await self._enrich_card(product)
+
+    async def _enrich_card(self, product: ProductIn) -> Enrichment | None:
+        """One LLM call for one product card (caller has already decided it should be
+        enriched). Every failure mode returns None so ingestion proceeds unenriched."""
         prompt = PROMPT_TEMPLATE.replace("{card}", _product_card(product))
         try:
             async with self._semaphore:
@@ -135,7 +140,27 @@ class ProductEnrichmentService:
         return enrichment
 
     async def enrich_all(self, products: list[ProductIn]) -> list[Enrichment | None]:
-        return list(await asyncio.gather(*(self.enrich(p) for p in products)))
+        """Enrich a batch, deduplicating identical product cards: enrichment depends only
+        on the card text (name/brand/category/article/description), so N products with the
+        same card cost one LLM call, not N. Common on re-push / near-duplicate variants."""
+        cards: list[str | None] = []  # per input product: its card key, or None if skipped
+        to_run: dict[str, ProductIn] = {}  # unique card → representative product
+        for product in products:
+            if not self.should_enrich(product):
+                ENRICHMENT_TOTAL.labels(outcome="skipped").inc()
+                cards.append(None)
+                continue
+            card = _product_card(product)
+            to_run.setdefault(card, product)
+            cards.append(card)
+        if len(to_run) < sum(1 for c in cards if c is not None):
+            logger.info(
+                "enrichment: %d unique cards across %d products (deduped)", len(to_run), len(products)
+            )
+        order = list(to_run)
+        results = await asyncio.gather(*(self._enrich_card(to_run[card]) for card in order))
+        by_card = dict(zip(order, results, strict=True))
+        return [None if card is None else by_card[card] for card in cards]
 
 
 def _clean_str_list(raw: object, limit: int, max_len: int = MAX_VALUE_LEN) -> tuple[str, ...]:

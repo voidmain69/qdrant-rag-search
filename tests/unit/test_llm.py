@@ -3,11 +3,32 @@ import orjson
 import pytest
 
 from app.core.config import Settings
-from app.services.llm import LLMError, OllamaClient, OpenAIClient, build_llm_client
+from app.services.llm import (
+    LLM_RETRY_ATTEMPTS,
+    LLMError,
+    OllamaClient,
+    OpenAIClient,
+    build_llm_client,
+)
 
 
 def make_settings(**kwargs) -> Settings:
     return Settings(_env_file=None, **kwargs)
+
+
+def _counting_transport(responses):
+    """MockTransport that returns/raises the next item per call; the last item repeats.
+    A callable item is invoked to raise (e.g. httpx.ConnectError)."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        item = responses[min(len(calls), len(responses) - 1)]
+        calls.append(request)
+        if callable(item):
+            raise item()
+        return item
+
+    return httpx.MockTransport(handler), calls
 
 
 class TestOllamaClient:
@@ -65,6 +86,54 @@ class TestOpenAIClient:
         )
         with pytest.raises(LLMError):
             await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        await client.aclose()
+
+
+class TestRetry:
+    async def test_retries_transient_status_then_succeeds(self):
+        transport, calls = _counting_transport(
+            [httpx.Response(503), httpx.Response(200, json={"response": "{}"})]
+        )
+        client = OllamaClient("http://x", transport=transport, retry_base_delay=0.0)
+        out = await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        assert out == "{}"
+        assert len(calls) == 2  # first 503 retried, second succeeded
+        await client.aclose()
+
+    async def test_retries_transport_error_then_succeeds(self):
+        transport, calls = _counting_transport(
+            [lambda: httpx.ConnectError("boom"), httpx.Response(200, json={"response": "{}"})]
+        )
+        client = OllamaClient("http://x", transport=transport, retry_base_delay=0.0)
+        out = await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        assert out == "{}"
+        assert len(calls) == 2
+        await client.aclose()
+
+    async def test_persistent_transient_exhausts_attempts(self):
+        transport, calls = _counting_transport([httpx.Response(503)])
+        client = OllamaClient("http://x", transport=transport, retry_base_delay=0.0)
+        with pytest.raises(LLMError):
+            await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        assert len(calls) == LLM_RETRY_ATTEMPTS  # tried, backed off, gave up
+        await client.aclose()
+
+    async def test_non_transient_status_not_retried(self):
+        # 500 is a hard error (a real fault the same request won't fix), not retried
+        transport, calls = _counting_transport([httpx.Response(500)])
+        client = OllamaClient("http://x", transport=transport, retry_base_delay=0.0)
+        with pytest.raises(LLMError):
+            await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        assert len(calls) == 1
+        await client.aclose()
+
+    async def test_read_timeout_not_retried(self):
+        # a slow model (read timeout) is not down — retrying just doubles latency
+        transport, calls = _counting_transport([lambda: httpx.ReadTimeout("slow")])
+        client = OllamaClient("http://x", transport=transport, retry_base_delay=0.0)
+        with pytest.raises(LLMError):
+            await client.complete_json("hi", model="m", max_tokens=10, timeout=5)
+        assert len(calls) == 1
         await client.aclose()
 
 
