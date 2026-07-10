@@ -20,6 +20,7 @@ class StubQdrant:
         self.embed_upserts = 0
         self.set_payload_calls: list[tuple[str, dict]] = []
         self.deleted: list[str] = []
+        self.fail_upsert_on_call: int | None = None
 
     async def retrieve_payloads(self, point_ids):
         return {pid: dict(self.store[pid]) for pid in point_ids if pid in self.store}
@@ -28,6 +29,10 @@ class StubQdrant:
         return {pid for pid in point_ids if pid in self.store}
 
     async def upsert_points(self, points):
+        # optional fault injection: raise on the Nth upsert call (0-based) to simulate a
+        # storage failure partway through a chunked batch
+        if self.fail_upsert_on_call is not None and self.embed_upserts == self.fail_upsert_on_call:
+            raise RuntimeError("simulated Qdrant upsert failure")
         self.embed_upserts += 1
         for pt in points:
             self.store[pt.id] = dict(pt.payload)
@@ -43,7 +48,11 @@ class StubQdrant:
             self.store.pop(pid, None)
 
     async def all_external_ids_status(self):
-        return [(p["external_id"], p.get("status")) for p in self.store.values() if p.get("external_id")]
+        return [
+            (p["external_id"], p.get("status"), p.get("updated_at"))
+            for p in self.store.values()
+            if p.get("external_id")
+        ]
 
     async def count(self, count_filter=None):
         if count_filter is None:
@@ -145,7 +154,22 @@ class TestReconcile:
     async def _seed(self):
         service, qdrant, _e = make_service()
         await service.upsert_products([product("p1"), product("p2"), product("p3")])
+        # orphans are stale by nature; age the seed so it is clearly modified before a
+        # reconcile run (reconcile only archives products with updated_at < its start,
+        # so it never wrongly archives something ingested concurrently)
+        for payload in qdrant.store.values():
+            payload["updated_at"] = "2000-01-01T00:00:00+00:00"
         return service, qdrant
+
+    async def test_recent_orphan_is_not_archived(self):
+        # snapshot isolation: a product ingested after reconcile started (here simulated
+        # with a far-future updated_at) must not be archived even though it is absent
+        # from the snapshot — it may have been added concurrently after the snapshot.
+        service, qdrant = await self._seed()
+        qdrant.store[point_id_for("p3")]["updated_at"] = "2999-01-01T00:00:00+00:00"
+        r = await service.reconcile(["p1"], dry_run=False, max_archived=None)
+        assert set(r.external_ids) == {"p2"}  # p3 protected by its recent timestamp
+        assert qdrant.store[point_id_for("p3")]["status"] == "active"
 
     async def test_dry_run_reports_without_mutating(self):
         service, qdrant = await self._seed()
@@ -175,6 +199,22 @@ class TestReconcile:
         with pytest.raises(HTTPException) as exc:
             await service.reconcile(["p1"], dry_run=False, max_archived=1)  # 2 orphans > 1
         assert exc.value.status_code == 400
+
+
+class TestMidBatchFailure:
+    async def test_committed_chunk_is_indexed_even_if_a_later_chunk_fails(self):
+        # storage is not transactional across upsert chunks: a chunk committed before a
+        # later one fails must still land in the CodeIndex, or code search would miss it
+        # until the next restart. Force one product per chunk and fail the second chunk.
+        service, qdrant, _e = make_service(upsert_batch_size=1)
+        qdrant.fail_upsert_on_call = 1  # first chunk commits, second raises
+        with pytest.raises(RuntimeError):
+            await service.upsert_products([product("p1", article="AAA111"), product("p2", article="BBB222")])
+        # p1 committed to Qdrant AND present in the CodeIndex; p2 neither
+        assert point_id_for("p1") in qdrant.store
+        assert point_id_for("p2") not in qdrant.store
+        assert service.code_index.match("AAA111"), "committed product missing from CodeIndex"
+        assert not service.code_index.match("BBB222")
 
 
 class TestDiffAndStats:

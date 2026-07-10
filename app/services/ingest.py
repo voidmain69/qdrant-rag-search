@@ -108,7 +108,13 @@ class IngestService:
     async def upsert_products(self, items: list[ProductIn]) -> BatchUpsertResult:
         """Add/update products. Re-embeds only those whose searchable content changed
         (content-hash short-circuit) — an unchanged re-push just refreshes the payload
-        and re-activates the product. The pipeline is all-or-nothing: any failure raises."""
+        and re-activates the product.
+
+        On failure the whole request raises (no lying partial-success result). Storage is
+        not transactional across upsert chunks, so an earlier chunk may already be
+        committed to Qdrant when a later one fails; the CodeIndex is updated per committed
+        chunk (not once at the end) so it can never drift from Qdrant on a mid-batch
+        failure. A retry is safe: committed products skip re-embedding via content_hash."""
         # last write wins for duplicated external_ids inside one batch
         unique: dict[str, ProductIn] = {p.external_id: p for p in items}
         products = list(unique.values())
@@ -140,13 +146,10 @@ class IngestService:
                     "updated_at": now,
                 },
             )
-
-        # keep the code index consistent (idempotent; also re-activates a restored product)
-        for product, pid in zip(products, point_ids, strict=True):
-            self.code_index.add_product(
-                pid,
-                {"article": product.article, "product_code": product.product_code, "ean13": product.ean13},
-            )
+            # already persisted; keep the index consistent and re-activate a restored
+            # product (idempotent). Embedded products are indexed per-chunk inside
+            # _embed_and_upsert, right after each chunk commits.
+            self._index_codes(product, pid)
 
         if to_refresh:
             logger.info("upsert: %d embedded, %d unchanged (payload-only)", len(to_embed), len(to_refresh))
@@ -181,6 +184,16 @@ class IngestService:
         size = self.settings.upsert_batch_size
         for start in range(0, len(points), size):
             await self.qdrant.upsert_points(points[start : start + size])
+            # index only after the chunk is committed, so a later chunk failing can't
+            # leave committed points missing from the in-memory CodeIndex until restart
+            for product, pid, _hash in batch[start : start + size]:
+                self._index_codes(product, pid)
+
+    def _index_codes(self, product: ProductIn, pid: str) -> None:
+        self.code_index.add_product(
+            pid,
+            {"article": product.article, "product_code": product.product_code, "ean13": product.ean13},
+        )
 
     async def update_prices(self, updates: list[PriceUpdate]) -> BatchUpsertResult:
         """Payload-only update of price / availability. No embedding and no CodeIndex
@@ -242,11 +255,21 @@ class IngestService:
         """Snapshot reconciliation: archive every stored product NOT in `external_ids`
         (orphans left over from lost delete events). Never deletes — archiving is
         reversible, so a truncated snapshot is recoverable. `max_archived` refuses the
-        run if it would archive too many, guarding against a broken source feed."""
+        run if it would archive too many, guarding against a broken source feed.
+
+        Snapshot isolation: only products last modified BEFORE this call started are
+        eligible, so a product ingested concurrently (updated_at ≥ reconcile start) is
+        never wrongly archived. Build the source snapshot immediately before calling to
+        keep the still-unprotected window (snapshot build → this call) small."""
+        reconcile_start = datetime.now(UTC).isoformat(timespec="seconds")
         snapshot = set(external_ids)
         stored = await self.qdrant.all_external_ids_status()
         orphans = [
-            eid for eid, status in stored if eid not in snapshot and status != ProductStatus.ARCHIVED.value
+            eid
+            for eid, status, updated_at in stored
+            if eid not in snapshot
+            and status != ProductStatus.ARCHIVED.value
+            and (updated_at is None or updated_at < reconcile_start)
         ]
         if max_archived is not None and len(orphans) > max_archived:
             raise HTTPException(
@@ -265,7 +288,7 @@ class IngestService:
     async def diff(self, external_ids: list[str]) -> DiffResult:
         """Report drift between the source snapshot and the index without mutating."""
         snapshot = set(external_ids)
-        stored = {eid for eid, _ in await self.qdrant.all_external_ids_status()}
+        stored = {eid for eid, _, _ in await self.qdrant.all_external_ids_status()}
         missing = sorted(snapshot - stored)
         extra = sorted(stored - snapshot)
         return DiffResult(
