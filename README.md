@@ -264,7 +264,7 @@ Filters are applied inside the vector query (indexed payload fields) for the hyb
   "items": [
     {
       "product": { /* full stored payload, incl. *_norm fields, updated_at, embed_model */ },
-      "score": 0.87,                  // RRF score (hybrid) or code score (code branches)
+      "score": 0.87,                  // branch-dependent — NOT comparable across branches (see note)
       "match": {
         "branch": "hybrid",           // exact | exact_normalized | ean_corrected | fuzzy | hybrid
         "matched_field": null,        // article | product_code | ean13 (code branches)
@@ -278,6 +278,8 @@ Filters are applied inside the vector query (indexed payload fields) for the hyb
   "alternatives": []                  // strict mode: ranked near-misses; [] in relaxed mode
 }
 ```
+
+> **`score` is branch-dependent and not comparable across hits.** Hybrid hits carry a Qdrant **RRF** score (typically ~0.01–0.03), code-branch hits carry a **code score** (0.80–1.00), and a reranked hybrid hit carries a raw **cross-encoder logit** (unbounded, can be negative). `items` is returned in final rank order (exact code hits pinned first, then fuzzy code hits interleaved with hybrid results) — treat `score` as a per-hit diagnostic and **do not re-sort by it**, or you will destroy the intended ordering.
 
 ### Search modes
 

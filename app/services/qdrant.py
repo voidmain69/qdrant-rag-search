@@ -238,10 +238,11 @@ class QdrantService:
             if offset is None:
                 return
 
-    async def all_external_ids_status(self) -> list[tuple[str, str | None]]:
-        """Every stored product as (external_id, status) — payload-only scroll for
-        reconcile/diff/stats. Fine to materialize at catalog scale (≤ ~100k)."""
-        out: list[tuple[str, str | None]] = []
+    async def all_external_ids_status(self) -> list[tuple[str, str | None, str | None]]:
+        """Every stored product as (external_id, status, updated_at) — payload-only scroll
+        for reconcile/diff/stats. `updated_at` lets reconcile skip products modified after
+        it started (snapshot isolation). Fine to materialize at catalog scale (≤ ~100k)."""
+        out: list[tuple[str, str | None, str | None]] = []
         offset = None
         while True:
             current_offset = offset
@@ -250,7 +251,7 @@ class QdrantService:
                     self.collection,
                     limit=1000,
                     offset=current_offset,  # noqa: B023 — invoked immediately by _with_retry
-                    with_payload=["external_id", "status"],
+                    with_payload=["external_id", "status", "updated_at"],
                     with_vectors=False,
                 ),
                 "scroll",
@@ -259,7 +260,7 @@ class QdrantService:
                 payload = p.payload or {}
                 external_id = payload.get("external_id")
                 if external_id:
-                    out.append((str(external_id), payload.get("status")))
+                    out.append((str(external_id), payload.get("status"), payload.get("updated_at")))
             if offset is None:
                 return out
 

@@ -9,6 +9,7 @@ from app.services.ingest import IngestService
 router = APIRouter(tags=["imports"])
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_READ_CHUNK_BYTES = 1024 * 1024
 
 
 @router.post("/imports", response_model=ImportJob, status_code=202)
@@ -25,9 +26,17 @@ async def start_import(
             mapping = orjson.loads(column_mapping)
         except orjson.JSONDecodeError as exc:
             raise HTTPException(status_code=422, detail=f"column_mapping is not valid JSON: {exc}") from exc
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
+    # Reject on the declared size first (fast path), then read in bounded chunks and abort
+    # the moment we cross the limit — so an oversized (or size-lying) upload can never be
+    # fully buffered into RAM before the 413.
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+    buffer = bytearray()
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        buffer.extend(chunk)
+        if len(buffer) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+    content = bytes(buffer)
     job = jobs.create(file.filename or "upload")
     background.add_task(run_import, job, content, mapping, ingest)
     return job

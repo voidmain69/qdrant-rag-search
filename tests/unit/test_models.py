@@ -63,3 +63,9 @@ class TestSearchRequest:
 
     def test_query_stripped(self):
         assert SearchRequest(query="  дриль ").query == "дриль"
+
+    def test_offset_upper_bound_rejected(self):
+        # deep pagination is unsupported and an unbounded offset is a fetch DoS lever
+        SearchRequest(query="x", offset=1000)  # at the cap: allowed
+        with pytest.raises(ValidationError):
+            SearchRequest(query="x", offset=1001)

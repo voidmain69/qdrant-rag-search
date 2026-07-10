@@ -10,7 +10,10 @@ Status legend: ✅ done · 🟡 partial / documented tradeoff · ⬜ deliberatel
 | Input validation on every endpoint | ✅ | Pydantic v2; whitespace stripped (`str_strip_whitespace`), EAN digits-only, size limits on all fields |
 | Consistent error contract | ✅ | 401/400/404/413/422 + JSON 500 from the global exception handler; `rerank=true` on a non-rerank instance is 400 for **every** query kind |
 | Embedding-model / collection compatibility guard | ✅ | `service_meta` collection; refuses to start on mismatch |
-| Pagination semantics | 🟡 | `total` counts candidates within the prefetch window (documented), not the whole collection |
+| Pagination semantics | 🟡 | `total` counts candidates within the prefetch window (documented), not the whole collection; `offset` is capped at 1000 (deep pagination unsupported) |
+| Reconcile snapshot isolation | ✅ | reconcile only archives products last modified before it started (`updated_at < reconcile_start`), so a concurrently-ingested product is never wrongly archived |
+| CodeIndex consistent on mid-batch failure | ✅ | the in-memory code index is updated per committed upsert chunk, so a failure partway through a chunked batch can't leave committed points unindexed until restart |
+| Score comparability documented | ✅ | `score` is branch-dependent (RRF vs code score vs rerank logit) and not comparable across hits; the response is pre-ranked — documented in README + the `SearchHit.score` field |
 | Strict mode / LLM degradation | ✅ | Ollama failure, timeout or bad JSON → per-token heuristic coverage; search never depends on the LLM (`docs/search_semantics.md`) |
 
 ## Security
@@ -21,9 +24,12 @@ Status legend: ✅ done · 🟡 partial / documented tradeoff · ⬜ deliberatel
 | No default secrets in deployment configs | ✅ | compose fails fast if `API_KEYS` is unset (`${API_KEYS:?...}`) |
 | Refuse unauthenticated production start | ✅ | `ENVIRONMENT=production` + empty `API_KEYS` → startup error |
 | Non-root container | ✅ | `appuser` in Dockerfile |
-| Upload size limit | ✅ | 100 MB on `/imports` |
+| Upload size limit | ✅ | 100 MB on `/imports`, checked on declared size then enforced while reading in 1 MB chunks — an oversized body is never fully buffered before the 413 |
+| Admin console not publicly exposed | ✅ | Streamlit console (8501) has no auth of its own, so compose binds it to loopback (`UI_BIND` default `127.0.0.1`); reach it via SSH tunnel / authenticating proxy. No fallback API key in `ui/client.py` — a missing key fails loudly |
+| Container resource ceilings | ✅ | `mem_limit` on api/qdrant/ui (`API_MEM_LIMIT`/`QDRANT_MEM_LIMIT`/`UI_MEM_LIMIT`) bound runaway memory; tune per host |
+| Search offset bounded | ✅ | `offset ≤ 1000` so a request can't ask Qdrant for `offset+limit` unbounded points (fetch DoS lever) |
 | No stack traces / internals in responses | ✅ | generic JSON 500; details go to logs + Sentry only |
-| TLS termination, rate limiting, request body cap | ⬜ | at the reverse proxy / ingress (nginx `client_max_body_size`, etc.) |
+| TLS termination, rate limiting | ⬜ | at the reverse proxy / ingress (nginx, etc.) |
 
 ## Reliability
 

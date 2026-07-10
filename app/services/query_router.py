@@ -186,6 +186,8 @@ class SearchService:
         sparse_text = compose_sparse_query(req.query, cls.code_tokens)
         dense_vec, sparse_vec = await self.embedder.aembed_query(req.query, sparse_text)
         flt = build_filter(req.filters, req.include_archived)
+        # offset ≤ 1000 and limit ≤ 100 are enforced by SearchRequest, so fetch is bounded
+        # (≤ ~1100) — an unbounded offset would otherwise ask Qdrant for offset+limit points
         fetch = max(self.settings.prefetch_limit, req.offset + req.limit)
         points = await self.qdrant.hybrid_query(dense_vec, sparse_vec, flt, limit=fetch)
         items = [
