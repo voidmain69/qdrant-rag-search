@@ -13,7 +13,13 @@ import httpx
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-API_KEY = os.environ.get("API_KEY", "change-me-secret-key").split(",")[0].strip()
+# No fallback secret: the console wields full write/delete power, so a missing key must
+# fail loudly rather than silently ship a well-known default. API_KEYS may be
+# comma-separated; the console uses the first.
+_raw_key = os.environ.get("API_KEY", "").split(",")[0].strip()
+if not _raw_key:
+    raise RuntimeError("API_KEY is not set — the console has no key to authenticate to the API")
+API_KEY = _raw_key
 
 
 def _client(timeout: float = 60) -> httpx.Client:

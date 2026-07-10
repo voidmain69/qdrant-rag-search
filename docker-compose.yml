@@ -2,6 +2,9 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.17.1
     restart: unless-stopped
+    # Safety ceilings to bound runaway memory (not a sizing recommendation) — tune per
+    # host and catalog size. At ≤100k products vectors sit in RAM in the low hundreds of MB.
+    mem_limit: ${QDRANT_MEM_LIMIT:-4g}
     ports:
       - "6333:6333"   # REST + dashboard (http://localhost:6333/dashboard)
       - "6334:6334"   # gRPC
@@ -16,6 +19,9 @@ services:
   api:
     build: .
     restart: unless-stopped
+    # ~2.2 GB ONNX models + optional torch reranker + working set. Ceiling to cap runaway
+    # (e.g. concurrent large uploads), not a minimum — raise if you enable the reranker.
+    mem_limit: ${API_MEM_LIMIT:-6g}
     ports:
       - "8000:8000"
     environment:
@@ -55,14 +61,19 @@ services:
       retries: 60
       start_period: 300s   # first start downloads embedding models
 
-  # internal admin / testing / eval console (Streamlit) — talks to the api over HTTP
+  # internal admin / testing / eval console (Streamlit) — talks to the api over HTTP.
+  # The console has full write/delete/reconcile power and NO auth of its own, so it is
+  # bound to loopback only: reach it via an SSH tunnel or an authenticating reverse
+  # proxy, never by publishing 8501 on a public interface. Override UI_BIND to expose it
+  # deliberately (e.g. UI_BIND=0.0.0.0 behind a VPN).
   ui:
     build:
       context: .
       dockerfile: Dockerfile.ui
     restart: unless-stopped
+    mem_limit: ${UI_MEM_LIMIT:-1g}
     ports:
-      - "8501:8501"
+      - "${UI_BIND:-127.0.0.1}:8501:8501"
     environment:
       API_BASE_URL: http://api:8000
       API_KEY: ${API_KEYS:?}   # server-side; the key never reaches the browser

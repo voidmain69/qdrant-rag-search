@@ -42,7 +42,10 @@ class SearchRequest(BaseModel):
 
     query: str = Field(min_length=1, max_length=512)
     limit: int = Field(default=10, ge=1, le=100)
-    offset: int = Field(default=0, ge=0)
+    # Deep pagination is unsupported (total counts only the prefetch window), and an
+    # unbounded offset would ask Qdrant for offset+limit points — a memory/latency DoS
+    # lever. Cap it so the worst-case fetch stays bounded.
+    offset: int = Field(default=0, ge=0, le=1000)
     rerank: bool = False
     mode: SearchMode = SearchMode.RELAXED
     include_archived: bool = False  # archived products are hidden from search by default
@@ -62,7 +65,16 @@ class MatchExplanation(BaseModel):
 
 class SearchHit(BaseModel):
     product: dict[str, Any]
-    score: float
+    # Branch-dependent and NOT comparable across hits: a hybrid hit carries a Qdrant RRF
+    # score (~0.01–0.03), a code-branch hit carries its code score (0.80–1.00), and a
+    # reranked hybrid hit carries a raw cross-encoder logit (unbounded, can be negative).
+    # `items` is already in final rank order — treat `score` as a diagnostic, do not
+    # re-sort by it across branches.
+    score: float = Field(
+        description="Branch-dependent relevance score (RRF for hybrid, code score for code "
+        "branches, cross-encoder logit if reranked). Not comparable across branches; the "
+        "list is already ranked — do not re-sort by this value."
+    )
     match: MatchExplanation
 
 
