@@ -16,7 +16,7 @@ COPY data ./data
 FROM python:3.13-slim-bookworm
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
-    && mkdir -p /models && chown appuser:appuser /models
+    && mkdir -p /models /data && chown appuser:appuser /models /data
 
 WORKDIR /app
 COPY --from=builder /app /app

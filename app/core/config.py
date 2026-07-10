@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     prefetch_limit: int = 50
     schema_version: int = 1
 
+    # Path to the SQLite file that persists background job (import / async batch) state so
+    # jobs survive a restart and a job left running by a died process is reaped on boot.
+    # Empty = ephemeral in-memory only (jobs vanish on restart — the pre-durability default).
+    # In docker this points at a mounted volume (see docker-compose.yml).
+    jobs_db_path: str = ""
+
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]

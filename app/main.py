@@ -73,7 +73,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.code_index = code_index
     app.state.ingest_service = IngestService(settings, embedder, qdrant, code_index, enricher)
     app.state.search_service = SearchService(settings, qdrant, embedder, code_index, reranker, understanding)
-    app.state.job_store = JobStore()
+    job_store = JobStore(settings.jobs_db_path)
+    await job_store.initialize()  # load persisted jobs + reap ones a dead process left running
+    app.state.job_store = job_store
     app.state.ready = True
     logger.info("Service ready")
 
@@ -81,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if llm_client:
         await llm_client.aclose()
+    job_store.close()
     await qdrant.close()
 
 
