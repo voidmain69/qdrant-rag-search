@@ -172,14 +172,6 @@ def _token_covered(token: str, haystack: str, words: list[str]) -> bool:
     return False
 
 
-def token_in_texts(token: str, texts: list[str]) -> bool:
-    """Is the token lexically represented in any of the given texts? Used by the
-    query-understanding guardrail to detect constraints the LLM dropped."""
-    haystack = " ".join(texts).lower()
-    words = _HAYSTACK_WORD_RE.findall(haystack)
-    return _token_covered(token, haystack, words)
-
-
 def _phrase_covered(phrase: str, haystack: str, words: list[str]) -> bool:
     """A variant phrase is covered when every one of its tokens is covered."""
     tokens = _QUERY_TOKEN_RE.findall(phrase.lower())

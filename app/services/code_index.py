@@ -23,7 +23,7 @@ from rapidfuzz.distance import OSA, JaroWinkler
 
 from app.models.search import MatchBranch
 from app.services.ean import ean13_variants
-from app.services.normalization import norm_code, skeleton
+from app.services.normalization import is_ean_shape, norm_code, skeleton
 
 # Score tiers of the matching cascade. Fuzzy scores are capped strictly below the
 # strong tiers so that ordering by score always reproduces the tier order.
@@ -140,7 +140,7 @@ class CodeIndex:
         if refs:
             return [CodeHit(r.point_id, r.field, SKELETON_SCORE, MatchBranch.EXACT_NORMALIZED) for r in refs]
 
-        if normed.isdigit() and 12 <= len(normed) <= 14:
+        if is_ean_shape(normed):
             candidates, _ = ean13_variants(normed)
             ean_hits = [
                 CodeHit(r.point_id, r.field, EAN_SCORE, MatchBranch.EAN_CORRECTED)
