@@ -37,8 +37,8 @@ async def start_import(
         if len(buffer) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
     content = bytes(buffer)
-    job = jobs.create(file.filename or "upload")
-    background.add_task(run_import, job, content, mapping, ingest)
+    job = await jobs.create(file.filename or "upload")
+    background.add_task(run_import, job, content, mapping, ingest, jobs)
     return job
 
 

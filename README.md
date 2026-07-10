@@ -174,7 +174,8 @@ Base URL: `http://<host>:8000`. OpenAPI/Swagger UI: **`/docs`**.
 | Method & path | Purpose | Success |
 |---|---|---|
 | `POST /api/v1/products` | Upsert one product | `200` → batch result |
-| `POST /api/v1/products:batch` | Upsert up to 1000 products | `200` → batch result |
+| `POST /api/v1/products:batch` | Upsert up to 1000 products (synchronous) | `200` → batch result |
+| `POST /api/v1/products:batch-async` | Enqueue a batch upsert as a background job | `202` → job |
 | `PUT /api/v1/products/{external_id}` | Full replace (body `external_id` must match path) | `200` |
 | `PATCH /api/v1/products/{external_id}/price` | Update only price / availability — no re-embedding | `200`; `404` if absent |
 | `POST /api/v1/products:prices` | Bulk price / availability update (≤1000, partial success) | `200` → batch result |
@@ -434,7 +435,8 @@ Pre-warm the model cache without starting the API: `uv run python scripts/downlo
 ### Scaling notes
 
 - ≤100k products fit comfortably on a single Qdrant node with vectors in RAM (~410 MB dense); no quantization needed. Binary/scalar quantization and Qdrant clustering are the escalation path beyond ~1M.
-- The API is stateless **except** for the in-memory CodeIndex (rebuilt from a payload-only scroll at startup, updated incrementally) and the import JobStore. Multiple replicas each hold their own CodeIndex copy — fine at this scale; ingest through one replica or rebuild others periodically if you shard writes.
+- The API is stateless **except** for the in-memory CodeIndex (rebuilt from a payload-only scroll at startup, updated incrementally) and the background JobStore. Multiple replicas each hold their own CodeIndex copy — fine at this scale; ingest through one replica or rebuild others periodically if you shard writes.
+- **Background jobs are durable** when `JOBS_DB_PATH` is set (SQLite, on a volume in the shipped compose): import and async-batch job state survives a restart, and a job left `running` by a process that died is reaped to `failed` on the next boot (rather than dangling forever). The store is still per-instance, so job polling must hit the replica that owns the DB file; a shared DB / Redis is the multi-replica escalation.
 
 ---
 
@@ -559,5 +561,5 @@ Unit tests never import ONNX (the FastEmbed import is deferred into `EmbeddingSe
 - **Codes excluded from the dense vector, included in the sparse one.** Semantic vectors stay clean; lexical code matching still works inside the hybrid branch.
 - **Ukrainian stemming** does not exist in FastEmbed's BM25; the Russian stemmer + verbatim token matching is used, and the dense model carries most of the Ukrainian semantics through RRF.
 - **`bge-m3` is not shipped by FastEmbed 0.8** — `multilingual-e5-large` is the strongest multilingual dense model in its catalog and is used by default; the model-profile abstraction makes swapping trivial (with a mandatory reindex, enforced by `service_meta`).
-- **In-memory import JobStore** — single-instance assumption; move to Redis/DB if you scale the API horizontally and need durable jobs.
+- **SQLite-backed JobStore** (`JOBS_DB_PATH`) — import/async-batch job state is durable across restarts and orphaned `running` jobs are reaped on boot; still per-instance (polling is replica-sticky), so move to a shared DB/Redis if you scale the API horizontally.
 - **Windows host note:** the ONNX embedding stack is flaky on bare Windows (MSVC runtime conflicts); the supported runtime is Docker. Unit tests are unaffected.

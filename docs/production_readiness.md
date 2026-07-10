@@ -40,8 +40,10 @@ Status legend: ✅ done · 🟡 partial / documented tradeoff · ⬜ deliberatel
 | Bounded in-memory state | ✅ | JobStore evicts finished jobs beyond 500; CodeIndex is by design per-replica (README scaling notes) |
 | Thread-safety of shared state | ✅ | CodeIndex guards reads and mutations with a lock; fuzzy scan works on snapshots |
 | LLM transient-failure resilience | ✅ | `llm.py` retries genuinely transient LLM failures (429/502/503/504 + transport errors) with exponential backoff; read/pool timeouts (slow model, not down) degrade instead of doubling latency. Enrichment dedups identical product cards in a batch (N copies → one call); query understanding coalesces concurrent identical queries (singleflight) so a cold-cache stampede is one call, not N |
-| Graceful shutdown | 🟡 | uvicorn drains requests; an in-flight import job dies with the process (in-memory JobStore — documented single-instance tradeoff, move to Redis/DB when scaling out) |
-| Multi-replica story | 🟡 | stateless except CodeIndex + JobStore; documented in README scaling notes |
+| Graceful shutdown | 🟡 | uvicorn drains requests; an in-flight import/batch job that dies with the process is reaped to `failed` on the next boot (durable SQLite JobStore, `JOBS_DB_PATH`) rather than dangling — job **state** survives, in-flight **work** still needs re-submitting |
+| Durable background jobs | ✅ | import + async-batch job state persisted to SQLite (`JOBS_DB_PATH`, on a volume in compose); survives restart; orphaned `running` jobs reaped on startup. Empty path = in-memory only (pre-durability behavior) |
+| Batch timeout safety | ✅ | `POST /products:batch-async` runs a large / enrichment-heavy batch as a background job (202 + job_id) so it can't time out the request; synchronous `:batch` stays for modest batches |
+| Multi-replica story | 🟡 | stateless except CodeIndex + JobStore (per-instance; job polling is replica-sticky); documented in README scaling notes |
 
 ## Observability
 

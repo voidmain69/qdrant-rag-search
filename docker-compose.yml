@@ -46,11 +46,14 @@ services:
       QUERY_LLM_MODEL: ${QUERY_LLM_MODEL:-gemma4:e4b}
       INGEST_LLM_ENABLED: ${INGEST_LLM_ENABLED:-false}
       INGEST_LLM_MODEL: ${INGEST_LLM_MODEL:-gemma4:e4b}
+      # durable background-job state (imports + async batches) survives restarts
+      JOBS_DB_PATH: ${JOBS_DB_PATH:-/data/jobs.db}
       DEBUG: ${DEBUG:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach host-side Ollama from the container
     volumes:
       - model_cache:/models   # ~2.2 GB of ONNX models, downloaded once on first start
+      - jobs_data:/data       # SQLite job store — persists import/batch job progress
     depends_on:
       qdrant:
         condition: service_healthy
@@ -86,3 +89,4 @@ services:
 volumes:
   qdrant_data:
   model_cache:
+  jobs_data:

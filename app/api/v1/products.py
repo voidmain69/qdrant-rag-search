@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from app.api.deps import get_ingest_service
+from app.api.deps import get_ingest_service, get_job_store
+from app.models.imports import ImportJob
 from app.models.product import (
     ArchiveRequest,
     BatchUpsertRequest,
@@ -15,6 +16,7 @@ from app.models.product import (
     ReconcileRequest,
     ReconcileResult,
 )
+from app.services.importer import JobStore, run_batch
 from app.services.ingest import IngestService
 
 router = APIRouter(tags=["products"])
@@ -31,7 +33,26 @@ async def upsert_product(
 async def upsert_products_batch(
     body: BatchUpsertRequest, ingest: IngestService = Depends(get_ingest_service)
 ) -> BatchUpsertResult:
+    """Synchronous batch upsert — returns once every item is embedded and stored. Fine for
+    modest batches; when ingest enrichment is on a large batch can run for minutes and time
+    out the request — use `POST /products:batch-async` for those."""
     return await ingest.upsert_products(body.items)
+
+
+@router.post("/products:batch-async", response_model=ImportJob, status_code=202)
+async def upsert_products_batch_async(
+    body: BatchUpsertRequest,
+    background: BackgroundTasks,
+    ingest: IngestService = Depends(get_ingest_service),
+    jobs: JobStore = Depends(get_job_store),
+) -> ImportJob:
+    """Enqueue a batch upsert as a background job (202 + job_id); poll
+    `GET /imports/{job_id}` for progress. The same heavy pipeline as `:batch`, but it can't
+    time out the request — for large or enrichment-heavy batches. Job state is durable when
+    JOBS_DB_PATH is set, so progress survives a restart."""
+    job = await jobs.create(f"batch upsert ({len(body.items)} items)")
+    background.add_task(run_batch, job, body.items, ingest, jobs)
+    return job
 
 
 @router.put("/products/{external_id}", response_model=BatchUpsertResult)
