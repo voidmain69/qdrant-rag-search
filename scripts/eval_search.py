@@ -21,11 +21,15 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import httpx
+
+BOOTSTRAP_ITERATIONS = 2000
+BOOTSTRAP_SEED = 12345  # fixed → the scorecard's CIs are reproducible run-to-run
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -65,6 +69,44 @@ def metrics_for(ranked: list[str], relevant: dict[str, int], k: int) -> tuple[fl
 
 def mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def bootstrap_ci(values: list[float], confidence: float = 0.95) -> tuple[float, float]:
+    """95% confidence interval of the mean via bootstrap resampling. Deterministic
+    (fixed seed) so the scorecard is stable. A tiny segment (n=3) prints a wide interval,
+    so nobody reads a 0.667 from three queries as a stable number."""
+    if len(values) < 2:
+        m = mean(values)
+        return (m, m)
+    rng = random.Random(BOOTSTRAP_SEED)
+    n = len(values)
+    means = sorted(mean([values[rng.randrange(n)] for _ in range(n)]) for _ in range(BOOTSTRAP_ITERATIONS))
+    lo = means[int((1 - confidence) / 2 * BOOTSTRAP_ITERATIONS)]
+    hi = means[int((1 + confidence) / 2 * BOOTSTRAP_ITERATIONS)]
+    return (round(lo, 3), round(hi, 3))
+
+
+def gate(
+    results: dict, baseline: dict | None, min_ndcg: float | None, max_regression: float | None
+) -> list[str]:
+    """Return the reasons a run fails the quality gate (empty = pass). Gates the overall
+    and the LLM-independent segments (relaxed / code / mixed) — strict depends on the LLM
+    query-understanding path, so it is reported but never gated (it would flap without a
+    warm Ollama). Used by CI to fail a PR that regresses search quality."""
+    reasons: list[str] = []
+    overall = results["overall"]["ndcg"]
+    if min_ndcg is not None and overall < min_ndcg:
+        reasons.append(f"overall nDCG {overall:.3f} below floor {min_ndcg:.3f}")
+    if baseline is not None and max_regression is not None:
+        drop = baseline["overall"]["ndcg"] - overall
+        if drop > max_regression:
+            reasons.append(f"overall nDCG dropped {drop:+.3f} (> {max_regression:.3f}) vs baseline")
+        for seg in ("mode:relaxed", "kind:code", "kind:mixed"):
+            if seg in results["segments"] and seg in baseline["segments"]:
+                seg_drop = baseline["segments"][seg]["ndcg"] - results["segments"][seg]["ndcg"]
+                if seg_drop > max_regression:
+                    reasons.append(f"{seg} nDCG dropped {seg_drop:+.3f} (> {max_regression:.3f}) vs baseline")
+    return reasons
 
 
 class Client:
@@ -114,10 +156,12 @@ def run(client: Client, dataset: list[dict], k: int) -> dict:
         )
 
     def agg(rows: list[dict]) -> dict:
+        ndcgs = [r["ndcg"] for r in rows]
         return {
             "recall": mean([r["recall"] for r in rows]),
             "mrr": mean([r["mrr"] for r in rows]),
-            "ndcg": mean([r["ndcg"] for r in rows]),
+            "ndcg": mean(ndcgs),
+            "ndcg_ci": list(bootstrap_ci(ndcgs)),
             "n": len(rows),
         }
 
@@ -136,7 +180,11 @@ def format_scorecard(results: dict, label: str) -> str:
     out = [f"=== eval scorecard: {label}  (k={results['k']}, n={results['overall']['n']}) ==="]
 
     def line(name: str, m: dict) -> str:
-        return f"  {name:20} nDCG={m['ndcg']:.3f}  Recall={m['recall']:.3f}  MRR={m['mrr']:.3f}  (n={m['n']})"
+        lo, hi = m.get("ndcg_ci", (m["ndcg"], m["ndcg"]))
+        return (
+            f"  {name:20} nDCG={m['ndcg']:.3f} [{lo:.2f},{hi:.2f}]  "
+            f"Recall={m['recall']:.3f}  MRR={m['mrr']:.3f}  (n={m['n']})"
+        )
 
     out.append(line("OVERALL", results["overall"]))
     out.append("  --- segments ---")
@@ -233,6 +281,12 @@ def main() -> None:
     ap.add_argument("--out", type=Path, help="save results JSON")
     ap.add_argument("--compare", type=Path, help="baseline results JSON to diff against")
     ap.add_argument("--judge", action="store_true", help="LLM-judge pooled top-k (bias check)")
+    ap.add_argument("--min-ndcg", type=float, help="CI gate: fail (exit 1) if overall nDCG is below this")
+    ap.add_argument(
+        "--max-regression",
+        type=float,
+        help="CI gate: fail if overall/relaxed/code/mixed nDCG drops more than this vs --compare baseline",
+    )
     args = ap.parse_args()
 
     client = Client(args.base_url, args.api_key)
@@ -251,6 +305,7 @@ def main() -> None:
         args.out.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     safe_print(scorecard)
 
+    baseline = None
     if args.compare:
         baseline = json.loads(args.compare.read_text("utf-8"))
         diff = format_diff(baseline, results)
@@ -261,6 +316,15 @@ def main() -> None:
         report = judge_pool(client, dataset, args.k)
         (ROOT / "eval" / "judge-report.txt").write_text(report, encoding="utf-8")
         safe_print("\n" + report)
+
+    if args.min_ndcg is not None or args.max_regression is not None:
+        failures = gate(results, baseline, args.min_ndcg, args.max_regression)
+        if failures:
+            safe_print("\n=== quality gate: FAIL ===")
+            for reason in failures:
+                safe_print(f"  - {reason}")
+            sys.exit(1)
+        safe_print("\n=== quality gate: PASS ===")
 
 
 if __name__ == "__main__":

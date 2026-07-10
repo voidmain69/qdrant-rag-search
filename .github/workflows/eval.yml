@@ -1,0 +1,81 @@
+name: search-quality eval
+
+# Runs the search-quality harness against a live stack and fails on a regression.
+#
+# Manual trigger for now (workflow_dispatch): it brings up Qdrant + the API and downloads
+# ~2.2 GB of embedding models, so it is heavier than the unit CI. Promote it to a PR gate
+# by adding a `pull_request:` trigger with a `paths:` filter once you have committed a
+# baseline generated with the SAME config this job uses (LLM off) — otherwise the strict
+# segment diverges. The gate ignores the strict segment (it depends on a warm Ollama that
+# CI does not run); it fails only on an overall/relaxed/code/mixed nDCG regression.
+on:
+  workflow_dispatch:
+    inputs:
+      min_ndcg:
+        description: "fail if overall nDCG is below this"
+        default: "0.90"
+      max_regression:
+        description: "fail if overall/relaxed/code/mixed nDCG drops more than this vs baseline"
+        default: "0.05"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.17.1
+        ports:
+          - 6333:6333
+    env:
+      QDRANT_URL: http://localhost:6333
+      API_KEYS: ci-eval-key
+      ENVIRONMENT: staging
+      METRICS_ENABLED: "false"
+      # deterministic: no LLM query understanding / enrichment, so the run matches a
+      # baseline generated the same way (strict then uses the heuristic coverage path)
+      QUERY_LLM_ENABLED: "false"
+      INGEST_LLM_ENABLED: "false"
+      FASTEMBED_CACHE_PATH: /home/runner/models
+      HF_HOME: /home/runner/models/hf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Cache embedding models
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/models
+          key: fastembed-${{ hashFiles('app/services/embedding.py') }}-e5-large-bm25
+
+      - name: Start API
+        run: |
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          echo "waiting for /ready (models download on first run)…"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/ready >/dev/null; then echo "ready"; exit 0; fi
+            sleep 10
+          done
+          echo "API did not become ready in time"; exit 1
+
+      - name: Run search-quality gate
+        run: |
+          uv run --no-sync python scripts/eval_search.py \
+            --setup \
+            --base-url http://localhost:8000 --api-key ci-eval-key \
+            --compare eval/baseline.json --label ci \
+            --min-ndcg "${{ github.event.inputs.min_ndcg }}" \
+            --max-regression "${{ github.event.inputs.max_regression }}"
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-scorecard
+          path: eval/*.txt

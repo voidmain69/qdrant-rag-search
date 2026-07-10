@@ -46,3 +46,16 @@
 {"query": "монітор 27 дюймів 165 гц", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"el-002": 3}}
 {"query": "лампа E27 4000K", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"light-001": 3}}
 {"query": "акумулятор makita 18V 5Ah", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-004": 3}}
+{"query": "дриль ударний 600 вт", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-001": 3}}
+{"query": "перфоратор 800 вт sds-plus", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-002": 3}}
+{"query": "болгарка 125 мм 720 вт", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-005": 3}}
+{"query": "акумуляторний шуруповерт 54 нм", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"tool-003": 3}}
+{"query": "лампа e27 13 вт 4000 к", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"light-001": 3}}
+{"query": "чайник електричний 2400 вт", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"home-005": 3}}
+{"query": "автомобільний акумулятор 74 аг 680 а", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"auto-001": 3}}
+{"query": "моторна олива 5w-30 4 л", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"auto-002": 3}}
+{"query": "робот пилосос 6000 па", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"home-002": 3}}
+{"query": "прожектор 50 вт ip65", "lang": "uk", "kind": "text", "mode": "strict", "relevant": {"light-002": 3}}
+{"query": "пилосос", "lang": "uk", "kind": "text", "relevant": {"home-001": 2, "home-002": 2, "home-003": 2}}
+{"query": "електроінструмент bosch", "lang": "uk", "kind": "text", "relevant": {"tool-001": 2, "tool-002": 2, "tool-007": 2}}
+{"query": "інструмент makita", "lang": "uk", "kind": "text", "relevant": {"tool-003": 2, "tool-005": 2, "tool-004": 1}}
