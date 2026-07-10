@@ -85,9 +85,15 @@ def skeleton(normed: str) -> str:
     return normed.translate(OCR_FOLD)
 
 
-def is_ean_like(token: str) -> bool:
-    compact = _compact(token)
+def is_ean_shape(compact: str) -> bool:
+    """EAN/UPC/GTIN shape test on an already-normalized (compact) string: 12–14 digits.
+    Single source of truth for 'looks like a barcode', shared by `is_ean_like` (raw token)
+    and the code index (which already holds a `norm_code`-normalized string)."""
     return compact.isdigit() and 12 <= len(compact) <= 14
+
+
+def is_ean_like(token: str) -> bool:
+    return is_ean_shape(_compact(token))
 
 
 def is_code_like(token: str) -> bool:
