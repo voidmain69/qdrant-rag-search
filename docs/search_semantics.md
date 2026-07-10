@@ -52,8 +52,11 @@ Tokens: ["безщітковий", "шуруповерт"]
 Each of *our* tokens becomes one requirement (token itself always the first variant).
 Coverage then checks each requirement against the product's own fields: a requirement
 is satisfied when **any** of its variants matches lexically (digit-boundary rules for
-numbers, prefix rules for words — see `app/services/coverage.py`). `missing_terms`
-reports requirement names, so the client sees *what* is missing.
+numbers, prefix rules for words, and cross-script/spelling equivalence for measurement
+units — «165 гц» covers `165 Hz`, «27 дюймів» covers `27 inch` — see
+`app/services/coverage.py`). `missing_terms` reports requirement names, so the client
+sees *what* is missing. The unit equivalences close the "27 дюймів 165 гц" failure class,
+where a numeric spec was written in a different script/abbreviation than the query used.
 
 Why this shape:
 

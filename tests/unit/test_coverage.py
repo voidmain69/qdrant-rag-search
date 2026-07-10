@@ -75,6 +75,40 @@ class TestCoverage:
         assert coverage([], MB_WITH_HDMI) == (1.0, [])
 
 
+MONITOR = {
+    "name": 'Монітор Samsung Odyssey 27" 165 Hz',
+    "attributes": {"Діагональ": "27 inch", "Частота оновлення": "165 Hz"},
+}
+
+
+class TestUnitEquivalence:
+    """The "27 дюймів 165 гц" class: a unit typed in one script/spelling must cover the
+    same unit written another way in the product."""
+
+    def test_cyrillic_hz_covers_latin_hz(self):
+        # "гц" (query) must be covered by "Hz" in the product spec
+        assert coverage(["165", "гц"], MONITOR) == (1.0, [])
+
+    def test_inches_word_covers_inch(self):
+        # "дюймів" (uk, inflected) must be covered by "inch"
+        assert coverage(["27", "дюймів"], MONITOR) == (1.0, [])
+
+    def test_full_monitor_query_is_covered(self):
+        ratio, missing = coverage(["монітор", "27", "дюймів", "165", "гц"], MONITOR)
+        assert missing == []
+        assert ratio == 1.0
+
+    def test_unit_still_missing_when_absent(self):
+        # a product with no refresh-rate spec must still miss "гц"
+        board = {"name": "Материнська плата LGA 1200"}
+        _ratio, missing = coverage(["165", "гц"], board)
+        assert "гц" in missing
+
+    def test_watt_equivalence(self):
+        kettle = {"name": "Чайник", "attributes": {"Потужність": "2200 W"}}
+        assert coverage(["2200", "вт"], kettle) == (1.0, [])
+
+
 class TestRequirementsCoverage:
     """Requirements carry LLM-generated variants — synonymization without dictionaries."""
 

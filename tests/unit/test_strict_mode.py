@@ -182,3 +182,28 @@ async def test_relaxed_mode_never_calls_llm():
     service.understanding = stub  # type: ignore[assignment]
     await service.search(SearchRequest(query=BRUSHLESS_QUERY, mode=SearchMode.RELAXED))
     assert stub.calls == 0
+
+
+async def test_code_only_strict_skips_understanding():
+    # an unambiguous code lookup short-circuits before any hybrid hits exist, so query
+    # understanding (a wasted LLM call in strict mode) must not run
+    service = make_service([])
+    service.code_index.add_product("p1", {"article": "GSB-13-RE"})
+    stub = StubUnderstanding(BRUSHLESS_REQS)
+    service.understanding = stub  # type: ignore[assignment]
+    await service.search(SearchRequest(query="GSB-13-RE", mode=SearchMode.STRICT))
+    assert stub.calls == 0
+
+
+async def test_monitor_unit_spec_is_confident_in_strict_mode():
+    # regression for the "27 дюймів 165 гц" class: the correct monitor must be a confident
+    # item, not an alternative, even though the query units differ in script from the spec
+    monitor = {
+        "external_id": "mon-1",
+        "name": 'Монітор Samsung Odyssey G5 27"',
+        "attributes": {"Діагональ": "27 inch", "Частота оновлення": "165 Hz"},
+    }
+    service = make_service([monitor])
+    resp = await service.search(SearchRequest(query="монітор 27 дюймів 165 гц", mode=SearchMode.STRICT))
+    assert [h.product["external_id"] for h in resp.items] == ["mon-1"]
+    assert resp.items[0].match.query_coverage == 1.0

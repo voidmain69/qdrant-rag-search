@@ -64,7 +64,9 @@ Respond with JSON only:
 }
 Rules:
 - synonyms: include Ukrainian, Russian and English forms («материнська плата», «материнка», "motherboard");
-  translate technical terms found in the card (e.g. "Brushless" -> «безщітковий», «бесщеточный»)
+  translate technical terms found in the card (e.g. "Brushless" -> «безщітковий», «бесщеточный»);
+  for any measurement include both unit spellings a shopper might type («165 Гц» and "165 Hz",
+  «27 дюймів» and "27 inch")
 - attributes: only objective filterable facts (socket, form factor, voltage, ports, wireless, ...)
 - everything lowercase except proper names; no duplicates; empty list/object when nothing applies
 
